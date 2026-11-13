@@ -34,11 +34,15 @@ if (-not (Get-Command op -ErrorAction SilentlyContinue)) { throw "1Password CLI 
 op whoami *> $null
 if ($LASTEXITCODE -ne 0) { throw "Not signed in to 1Password. Turn on Settings > Developer > 'Integrate with 1Password CLI', then run 'op signin'." }
 
-op vault get $Vault *> $null
-if ($LASTEXITCODE -ne 0) { throw "1Password vault '$Vault' not found. Create it first." }
+# List-based checks: output is JSON metadata only (names/titles), never field values.
+$vaultOut = op vault list --format json 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Could not list 1Password vaults: $($vaultOut -join ' ')" }
+if (-not ($vaultOut | ConvertFrom-Json | Where-Object { $_.name -eq $Vault })) { throw "1Password vault '$Vault' not found. Create it first." }
 
-op item get $ItemTitle --vault $Vault *> $null
-if ($LASTEXITCODE -eq 0) { throw "1Password item '$ItemTitle' already exists in vault '$Vault'. Archive or rename it before generating a new key." }
+$itemOut = op item list --vault $Vault --format json 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Could not list items in vault '$Vault': $($itemOut -join ' ')" }
+$items = try { @($itemOut | ConvertFrom-Json) } catch { @() }  # an empty vault may print nothing or a plain message
+if ($items | Where-Object { $_.title -eq $ItemTitle }) { throw "1Password item '$ItemTitle' already exists in vault '$Vault'. Archive or rename it before generating a new key." }
 
 if (-not (Test-Path -LiteralPath $OutDir -PathType Container)) { throw "OutDir '$OutDir' does not exist." }
 $certPath = Join-Path $OutDir 'netsuite-sandbox-m2m-public.pem'
