@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { getReport, listReports, validateParams } from '../src/lib/catalog';
@@ -12,7 +14,7 @@ import { BuiltQuery, QueryProvider } from '../src/lib/types';
 
 const principal = (email: string) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
 const ENV = { NETSUITE_MOCK: 'true', ALLOWED_USERS: 'ann@example.com, bob@example.com' } as NodeJS.ProcessEnv;
-const OCT = { startDate: '2026-10-01', endDate: '2026-10-31' };
+const OCT = { fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026' };
 
 test('money: exact BigInt parse/format, no float drift, fails closed', () => {
   assert.equal(parseMoney('0.10') + parseMoney('0.20'), parseMoney('0.30')); // floats would fail this
@@ -22,21 +24,28 @@ test('money: exact BigInt parse/format, no float drift, fails closed', () => {
   assert.equal(formatMoney(parseMoney('1.1234')), '1.1234');
   assert.throws(() => parseMoney('1.1234567')); // >6 decimals
   assert.throws(() => parseMoney('12abc'));
+  // NetSuite has returned scientific notation; it must parse exactly, and still fail closed on lost precision.
+  assert.equal(formatMoney(parseMoney('3.572068025E7')), '35720680.25');
+  assert.equal(formatMoney(parseMoney('4.221607343e+7')), '42216073.43');
+  assert.equal(formatMoney(parseMoney(1e21)), '1000000000000000000000.00');
+  assert.equal(formatMoney(parseMoney('-1.5E2')), '-150.00');
+  assert.throws(() => parseMoney('1E-7'));
 });
 
 test('params: unknown, malformed and injected values are rejected', () => {
   const gl = getReport('gl_detail');
   assert.throws(() => validateParams(gl, { ...OCT, sql: 'DROP' }), /Unknown parameter/);
-  assert.throws(() => validateParams(gl, { startDate: '2026-02-30', endDate: '2026-03-01' }), /real date/);
-  assert.throws(() => validateParams(gl, { startDate: '2026-10-31', endDate: '2026-10-01' }), /End date/);
+  assert.throws(() => validateParams(gl, { fromPeriod: "Oct 2026'--", toPeriod: 'Oct 2026' }), /Period must be/);
+  assert.throws(() => validateParams(gl, { fromPeriod: 'Oct 2026', toPeriod: "x') OR ('1'='1" }), /Period must be/);
+  assert.throws(() => validateParams(gl, { ...OCT, startDate: '2026-10-01' }), /Unknown parameter/); // old date params are gone
   assert.throws(() => validateParams(gl, { ...OCT, account: "1000' OR '1'='1" }), /Account must be/);
-  assert.throws(() => validateParams(gl, { startDate: '2026-10-01' }), /required/);
+  assert.throws(() => validateParams(gl, { fromPeriod: 'Oct 2026' }), /required/);
   assert.deepEqual(validateParams(gl, { ...OCT, account: ' 1000 ' }), { ...OCT, account: '1000' });
 });
 
 test('catalog: every row query has ORDER BY; SQL is built only from validated values', () => {
   const samples: Record<string, Record<string, string>> = {
-    trial_balance: { asOfDate: '2026-10-31' },
+    trial_balance: { period: 'Oct 2026' },
     journal_entries: OCT,
     gl_detail: { ...OCT, account: '1000' },
     ar_aging: {},
@@ -46,7 +55,7 @@ test('catalog: every row query has ORDER BY; SQL is built only from validated va
     const { rows, totals } = getReport(r.id).build(validateParams(getReport(r.id), samples[r.id]));
     assert.match(rows, /ORDER BY/, `${r.id} rows need ORDER BY`);
     assert.doesNotMatch(totals + rows, /;|--/, `${r.id} has no statement separators`);
-    assert.equal(r.validated, false);
+    assert.equal(r.validated, true, `${r.id} validated flag`); // all five reconciled to NetSuite on 2026-11-13 (sandbox)
   }
   assert.equal(listReports().length, 5);
   assert.ok(!JSON.stringify(listReports()).includes('SELECT'), 'client listing must not leak SQL');
@@ -163,4 +172,132 @@ test('config: mock is refused on Azure; real mode without NetSuite settings fail
     env: { ALLOWED_USERS: 'ann@example.com' } as NodeJS.ProcessEnv,
   });
   assert.equal(unconfigured.status, 503);
+});
+
+test('trial balance: by posting period, FYTD P&L, prior-year P&L into the RE account, no injection', async () => {
+  const tb = getReport('trial_balance');
+  assert.throws(() => validateParams(tb, { period: "Oct 2026' OR '1'='1" }), /Period must be/);
+  assert.throws(() => validateParams(tb, {}), /required/);
+  const { totals, rows } = tb.build(validateParams(tb, { period: 'Oct 2026' }));
+  for (const sql of [totals, rows]) {
+    assert.match(sql, /accountingperiod/);
+    assert.match(sql, /periodname = 'Oct 2026'/);
+    assert.match(sql, /sspecacct = 'RetEarnings'/); // prior-year P&L rolls into the real RE account
+  }
+  assert.match(rows, /GROUP BY/);
+  const groupBy = rows.slice(rows.indexOf('GROUP BY'));
+  assert.doesNotMatch(groupBy, /SELECT/, 'no subqueries in GROUP BY/ORDER BY (Oracle rejects them)');
+  assert.doesNotMatch(rows, /BUILTIN\.DF/, 'BUILTIN.DF on a derived id fails in SuiteQL');
+  const r = await runService(principal('ann@example.com'), JSON.stringify({ report: 'trial_balance', params: { period: 'Oct 2026' } }), { env: ENV });
+  assert.equal(r.status, 200);
+  const body = r.body as { info: { balanced: boolean } };
+  assert.equal(body.info.balanced, true); // every transaction balances, so a cumulative TB must too
+});
+
+test('NetSuite omits null columns: missing debit/credit read as 0.00 and still reconcile', async () => {
+  class OmitsZeros implements QueryProvider {
+    inner = new MockProvider();
+    async query(q: BuiltQuery, offset: number, limit: number) {
+      const res = await this.inner.query(q, offset, limit);
+      if (q.kind === 'rows') {
+        for (const it of res.items) for (const k of ['debit', 'credit']) if (it[k] === '0.00') delete it[k]; // like NetSuite's null omission
+      }
+      return res;
+    }
+  }
+  const res = await runReport(getReport('gl_detail'), OCT, new OmitsZeros(), { maxRows: 20000, user: 'ann@example.com', mock: true });
+  const di = res.columns.findIndex((c) => c.key === 'debit');
+  const ci = res.columns.findIndex((c) => c.key === 'credit');
+  assert.ok(res.rows.every((r) => r[di] !== '' && r[ci] !== ''), 'no blank money cells');
+  assert.ok(res.rows.some((r) => r[di] === '0.00') && res.rows.some((r) => r[ci] === '0.00'));
+  assert.equal(res.info.reconciliation, 'PASS');
+});
+
+test('GL / JE: filter on posting period range (same basis as the TB), period column first, no subqueries in ORDER BY', () => {
+  for (const id of ['gl_detail', 'journal_entries']) {
+    const def = getReport(id);
+    assert.equal(def.columns[0].key, 'postingperiod');
+    const { totals, rows } = def.build(validateParams(def, { fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' }));
+    for (const sql of [totals, rows]) {
+      assert.match(sql, /pp\.startdate >= rg\.rstart AND pp\.enddate <= rg\.rend/);
+      assert.match(sql, /periodname = 'Sep 2026'/);
+      assert.match(sql, /periodname = 'Oct 2026'/);
+      assert.doesNotMatch(sql, /trandate >=|trandate <=/, 'no transaction-date filter any more');
+    }
+    assert.doesNotMatch(rows.slice(rows.indexOf('ORDER BY')), /SELECT/);
+  }
+});
+
+// The PowerShell test scripts carry a copy of the SQL (they cannot import TypeScript). Evaluate the
+// simple string assignments between BEGIN-SQL/END-SQL in scripts/NsCommon.ps1 and require an exact match.
+test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
+  const src = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'NsCommon.ps1'), 'utf8');
+  const evalBlock = (tag: string, vars: Record<string, string>) => {
+    let blk = src.slice(src.indexOf(`# BEGIN-SQL ${tag}`) + `# BEGIN-SQL ${tag}`.length, src.indexOf(`# END-SQL ${tag}`));
+    blk = blk.replace(/"\s*\+\s*\n\s*"/g, '').replace(/'\s*\+\s*\n\s*'/g, '');
+    for (const line of blk.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const m = /^\$(\w+)\s*=\s*(.*)$/.exec(line);
+      assert.ok(m, `unexpected line in ${tag} block: ${line}`);
+      let out = '';
+      for (const p of m[2].matchAll(/'((?:[^']|'')*)'|"([^"]*)"|\$(\w+)/g)) {
+        if (p[3] !== undefined) out += vars[p[3]];
+        else if (p[1] !== undefined) out += p[1].replace(/''/g, "'");
+        else out += p[2].replace(/\$(\w+)/g, (_, v: string) => vars[v]);
+      }
+      vars[m[1]] = out;
+    }
+    return vars;
+  };
+  const line = evalBlock('line', { From: 'Sep 2026', To: 'Oct 2026', ExtraWhere: '' });
+  const gl = getReport('gl_detail').build({ fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' });
+  assert.equal(line.totalsSql, gl.totals);
+  assert.equal(line.rowsSql, gl.rows);
+  const acct = evalBlock('glacct', { Account: '1040' });
+  const lineA = evalBlock('line', { From: 'Oct 2026', To: 'Oct 2026', ExtraWhere: acct.extra });
+  const glA = getReport('gl_detail').build({ fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026', account: '1040' });
+  assert.equal(lineA.totalsSql, glA.totals);
+  assert.equal(lineA.rowsSql, glA.rows);
+  const je = evalBlock('je', {});
+  const lineJ = evalBlock('line', { From: 'Oct 2026', To: 'Oct 2026', ExtraWhere: je.extra });
+  const jeTs = getReport('journal_entries').build({ fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026' });
+  assert.equal(lineJ.totalsSql, jeTs.totals);
+  assert.equal(lineJ.rowsSql, jeTs.rows);
+  for (const [id, vars] of [
+    ['ar_aging', { kindName: 'AcctRec', docType: 'CustInvc', credits: "'CustCred', 'CustPymt'", noName: '- No Customer -', lineAmt: '(NVL(tal.debit, 0) - NVL(tal.credit, 0))' }],
+    ['ap_aging', { kindName: 'AcctPay', docType: 'VendBill', credits: "'VendCred', 'VendPymt'", noName: '- No Vendor -', lineAmt: '(NVL(tal.credit, 0) - NVL(tal.debit, 0))' }],
+  ] as const) {
+    const ag = evalBlock('aging', { ...vars });
+    const agTs = getReport(id).build({});
+    assert.equal(ag.totalsSql, agTs.totals, `${id} totals`);
+    assert.equal(ag.rowsSql, agTs.rows, `${id} rows`);
+  }
+  const tbv = evalBlock('tb', { Period: 'Oct 2026' });
+  const tb = getReport('trial_balance').build({ period: 'Oct 2026' });
+  assert.equal(tbv.totalsSql, tb.totals);
+  assert.equal(tbv.rowsSql, tb.rows);
+});
+
+test('aging: verified fields only, journals at full amount, named "no customer/vendor", ties to control account', async () => {
+  for (const [id, kind, noName] of [['ar_aging', 'AcctRec', '- No Customer -'], ['ap_aging', 'AcctPay', '- No Vendor -']] as const) {
+    const { totals, rows } = getReport(id).build({});
+    for (const sql of [totals, rows]) {
+      assert.doesNotMatch(sql, /[^n]amountunpaid|[^n]paymentamountunused|amountremaining/, 'only foreign* fields exist (amountunpaid etc. return HTTP 500)');
+      assert.match(sql, new RegExp(`a\\.accttype = '${kind}'`));
+    }
+    assert.match(totals, /AS control/);
+    assert.match(rows, new RegExp(noName));
+  }
+  // The control-account tie fails closed.
+  class Untied implements QueryProvider {
+    inner = new MockProvider();
+    async query(q: BuiltQuery, offset: number, limit: number) {
+      const res = await this.inner.query(q, offset, limit);
+      if (q.kind === 'totals') res.items[0] = { ...res.items[0], control: '1.00' };
+      return res;
+    }
+  }
+  await assert.rejects(
+    runReport(getReport('ar_aging'), {}, new Untied(), { maxRows: 100, user: 'x', mock: true }),
+    (e: { code?: string; message?: string }) => e.code === 'RECONCILIATION_FAILED' && /control account/.test(e.message ?? ''),
+  );
 });

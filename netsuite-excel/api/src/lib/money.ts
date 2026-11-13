@@ -3,23 +3,37 @@
 const SCALE = 6;
 const FACTOR = 10n ** BigInt(SCALE);
 
-/** Parse a NetSuite amount (string or number or null) to micro-units. Throws on anything unexpected (fail closed). */
+/**
+ * Parse a NetSuite amount (string or number or null) to micro-units. Throws on anything unexpected (fail closed).
+ * Accepts scientific notation ("3.572068025E7"), which NetSuite has been seen to return, exactly (no floats).
+ * Throws if the value has more than 6 decimal places.
+ */
 export function parseMoney(v: unknown): bigint {
   if (v === null || v === undefined || v === '') return 0n;
   let s: string;
   if (typeof v === 'number') {
     if (!Number.isFinite(v)) throw new Error('Non-finite money value');
     s = String(v);
-    if (/e/i.test(s)) s = v.toFixed(SCALE);
   } else if (typeof v === 'string') {
     s = v.trim();
   } else {
     throw new Error('Unexpected money value type');
   }
-  const m = /^(-?)(\d+)(?:\.(\d{1,6}))?$/.exec(s);
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(s);
   if (!m) throw new Error('Unparseable money value');
-  const frac = (m[3] ?? '').padEnd(SCALE, '0');
-  const n = BigInt(m[2]) * FACTOR + BigInt(frac);
+  const fracDigits = m[3] ?? '';
+  const exp = m[4] === undefined ? 0 : Number(m[4]);
+  if (!Number.isSafeInteger(exp) || Math.abs(exp) > 40) throw new Error('Unreasonable money exponent');
+  const digits = BigInt(m[2] + fracDigits);
+  const shift = SCALE + exp - fracDigits.length; // value * 10^SCALE = digits * 10^shift
+  let n: bigint;
+  if (shift >= 0) {
+    n = digits * 10n ** BigInt(shift);
+  } else {
+    const div = 10n ** BigInt(-shift);
+    if (digits % div !== 0n) throw new Error('Money value has more than 6 decimal places');
+    n = digits / div;
+  }
   return m[1] === '-' ? -n : n;
 }
 

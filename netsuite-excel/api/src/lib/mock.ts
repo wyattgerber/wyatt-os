@@ -74,6 +74,24 @@ const OPEN_AP = [
   ['Mock Vendor B', 'VendBill', 'BILL3002', '2026-10-25', '2026-11-24', 2210],
 ] as const;
 
+/** Mock only: "Oct 2026" -> "2026-10-01". */
+function mockPeriodStart(period: string): string {
+  return `${mockPeriodEnd(period).slice(0, 8)}01`;
+}
+
+/** Mock only: "2026-10-15" -> "Oct 2026". */
+function mockPeriodName(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
+/** Mock only: "Oct 2026" -> "2026-10-31". Ignores fiscal-year / retained-earnings logic (real SQL does that). */
+function mockPeriodEnd(period: string): string {
+  const d = new Date(`${period} 1 UTC`);
+  if (Number.isNaN(d.getTime())) throw new Error('mock: unknown period');
+  const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  return end.toISOString().slice(0, 10);
+}
+
 const sumOf = (xs: bigint[]) => xs.reduce((a, b) => a + b, 0n);
 
 export class MockProvider implements QueryProvider {
@@ -89,7 +107,8 @@ export class MockProvider implements QueryProvider {
   private totals(q: BuiltQuery, rows: Record<string, unknown>[]): Record<string, unknown> {
     const col = (k: string) => sumOf(rows.map((r) => parseMoney(r[k])));
     if (q.report === 'ar_aging' || q.report === 'ap_aging') {
-      return { cnt: String(rows.length), openamount: this.moneyStr(col('openamount')) };
+      const open = this.moneyStr(col('openamount'));
+      return { cnt: String(rows.length), openamount: open, control: open };
     }
     return { cnt: String(rows.length), debits: this.moneyStr(col('debit')), credits: this.moneyStr(col('credit')) };
   }
@@ -100,7 +119,7 @@ export class MockProvider implements QueryProvider {
     switch (q.report) {
       case 'trial_balance': {
         const byAcct = new Map<string, { l: Line; d: bigint; c: bigint }>();
-        for (const l of LINES.filter((x) => x.trandate <= p.asOfDate)) {
+        for (const l of LINES.filter((x) => x.trandate <= mockPeriodEnd(p.period))) {
           const e = byAcct.get(l.acctnumber) ?? { l, d: 0n, c: 0n };
           e.d += l.debit;
           e.c += l.credit;
@@ -114,13 +133,13 @@ export class MockProvider implements QueryProvider {
       case 'gl_detail': {
         return LINES.filter(
           (l) =>
-            l.trandate >= p.startDate && l.trandate <= p.endDate &&
+            l.trandate >= mockPeriodStart(p.fromPeriod) && l.trandate <= mockPeriodEnd(p.toPeriod) &&
             (q.report === 'gl_detail' || l.trantype === 'Journal') &&
             (!p.account || l.acctnumber === p.account),
         )
           .sort((a, b) => a.trandate.localeCompare(b.trandate) || a.id - b.id || a.lineno - b.lineno || a.acctnumber.localeCompare(b.acctnumber))
           .map((l) => ({
-            trandate: l.trandate, trantype: l.trantype, tranid: l.tranid, acctnumber: l.acctnumber, acctname: l.acctname,
+            postingperiod: mockPeriodName(l.trandate), trandate: l.trandate, trantype: l.trantype, tranid: l.tranid, acctnumber: l.acctnumber, acctname: l.acctname,
             entityname: l.entityname, subsidiary: l.subsidiary, memo: l.memo, debit: m(l.debit), credit: m(l.credit),
           }));
       }

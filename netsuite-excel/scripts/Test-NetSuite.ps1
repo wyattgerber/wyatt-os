@@ -21,7 +21,7 @@ param(
     [string]$Vault = 'NetSuite',
     [string]$Item = 'NetSuite Sandbox M2M',
     [int]$ExpectedCount = 2230,
-    [decimal]$ExpectedAmount = 42216073.43,
+    [decimal]$ExpectedAmount = 42216073.43d,  # 'd' = real decimal literal; a plain 42216073.43 is a double and picks up float noise
     [string]$StartDate = '2026-10-01',
     [string]$EndDate = '2026-10-31',
     [switch]$SkipWriteTests
@@ -42,7 +42,8 @@ function Get-OpField([string]$Field) {
 
 function ConvertTo-Dec($v) {
     if ($null -eq $v -or "$v" -eq '') { return [decimal]0 }
-    return [decimal]::Parse([string]::Format($inv, '{0}', $v), $inv)
+    # NetSuite can return numbers in scientific notation (e.g. 3.572068025E7), so allow exponents.
+    return [decimal]::Parse([string]::Format($inv, '{0}', $v), [System.Globalization.NumberStyles]::Float, $inv)
 }
 
 $results = [System.Collections.Generic.List[object]]::new()
@@ -110,8 +111,12 @@ try {
     else {
         $row = $t1.Body.items[0]
         $cnt = [int](ConvertTo-Dec $row.cnt); $d = ConvertTo-Dec $row.debits; $c = ConvertTo-Dec $row.credits
-        $ok = ($cnt -eq $ExpectedCount) -and ($d -eq $ExpectedAmount) -and ($c -eq $ExpectedAmount)
-        $detail = "lines=$cnt (expect $ExpectedCount), debits=$($d.ToString('N2', $inv)), credits=$($c.ToString('N2', $inv)) (expect $($ExpectedAmount.ToString('N2', $inv)))"
+        # NetSuite SUMs are floating point; compare at cents and show the raw values so any noise is visible.
+        $dr = [math]::Round($d, 2); $cr = [math]::Round($c, 2)
+        $ok = ($cnt -eq $ExpectedCount) -and ($dr -eq $ExpectedAmount) -and ($cr -eq $ExpectedAmount)
+        Write-Host "Raw from NetSuite: cnt=$($row.cnt) debits=$($row.debits) credits=$($row.credits)"
+        if (($d -ne $dr) -or ($c -ne $cr)) { Write-Host 'NOTE: raw sums have more than 2 decimals (floating-point noise). The API rounds totals to cents to compare.' -ForegroundColor Yellow }
+        $detail = "lines=$cnt (expect $ExpectedCount), debits=$($dr.ToString('N2', $inv)), credits=$($cr.ToString('N2', $inv)) (expect $($ExpectedAmount.ToString('N2', $inv)))"
         Add-Result 'Test 1 totals' $(if ($ok) { 'PASS' } else { 'FAIL' }) $detail
 
         $br = Invoke-SuiteQL "SELECT t.type AS trantype, COUNT(*) AS cnt, SUM(tal.debit) AS debits, SUM(tal.credit) AS credits $from GROUP BY t.type ORDER BY t.type"
