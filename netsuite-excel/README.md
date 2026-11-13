@@ -5,7 +5,7 @@ Under 10 accounting users click **NetSuite** on the Excel ribbon, pick a report 
 > **STATUS (2026-11-13):** rebuilt from the written spec (the original bundle was lost). **All five reports' SQL is validated against the NetSuite sandbox** via the PowerShell check scripts (see results below). Not yet run: the API end to end (needs Node on a PC), the add-in in real Excel (needs IT's SWA), and anything against production NetSuite.
 
 ```
-Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
+Excel task pane (addin/, plain HTML + JS, Office.js, XML manifest; no build)
   -> Azure Functions proxy (api/, same Azure Static Web App, /api/*)
     -> NetSuite SuiteQL REST, OAuth 2.0 M2M (ES256 client-assertion JWT)
 ```
@@ -14,21 +14,21 @@ Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
 
 | Path | What |
 | --- | --- |
-| `api/src/lib/catalog.ts` | **All SQL lives here.** Report definitions, parameter validation, SuiteQL builders |
-| `api/src/lib/runReport.ts` | Totals check, row cap, paging, exact reconciliation gate |
-| `api/src/lib/netsuite.ts` | OAuth M2M JWT + SuiteQL client (retries, token cache) |
-| `api/src/lib/service.ts` | `/api/me`, `/api/reports`, `/api/periods` (real monthly periods, cached 10 min), `/api/run` logic (rejects unknown periods / reversed ranges) + AUDIT log line |
-| `api/src/lib/{auth,config,money,mock,errors,types}.ts` | principal header, app settings, BigInt money, mock data, errors, shared types |
-| `api/src/functions/api.ts` | Azure Functions v4 HTTP bindings (thin) |
-| `api/test/api.test.ts` | 12 tests (mock data) |
+| `api/src/lib/catalog.js` | **All SQL lives here.** Report definitions, parameter validation, SuiteQL builders |
+| `api/src/lib/runReport.js` | Totals check, row cap, paging, exact reconciliation gate |
+| `api/src/lib/netsuite.js` | OAuth M2M JWT + SuiteQL client (retries, token cache) |
+| `api/src/lib/service.js` | `/api/me`, `/api/reports`, `/api/periods` (real monthly periods, cached 10 min), `/api/run` logic (rejects unknown periods / reversed ranges) + AUDIT log line |
+| `api/src/lib/{auth,config,money,mock,errors}.js` | principal header, app settings, BigInt money, mock data, errors |
+| `api/src/functions/api.js` | Azure Functions v4 HTTP bindings (thin) |
+| `api/test/api.test.js` | 18 tests (mock data), incl. the PowerShell SQL-copy parity test |
 | `addin/manifest.xml` | Office add-in manifest (placeholders for the SWA host) |
 | `addin/preview/` | **Dev-only** preview: runs the real task pane in Chromium with the real API code in mock mode and a stand-in for Excel; `npm run preview` checks sign-in, period dropdowns, formats-before-values, frozen header, Refresh, and writes screenshots to `preview/out/` |
-| `addin/src/taskpane/` | `taskpane.ts` UI, `api.ts` fetch, `auth.ts` dialog sign-in, `excelWriter.ts` sheet writer, `signin-complete.html` |
+| `addin/` | Served as-is (no build): `taskpane.html` + `taskpane.js` UI, `api.js` fetch, `auth.js` dialog sign-in, `excelWriter.js` sheet writer, `signin-complete.html`, `manifest.xml`, `assets/` |
 | `scripts/New-NetSuiteCert.ps1` | Creates EC P-256 key + 730-day cert; private key goes straight to 1Password |
 | `scripts/Test-NetSuite.ps1` | Totals check, `accountingperiod` visibility, write-rejection tests |
 | `scripts/Test-TrialBalance.ps1`, `scripts/Test-GLDetail.ps1` | Run the report SQL against the sandbox from PowerShell (no Node) and check it: reconciliation gate, balance, GL-to-TB tie |
-| `scripts/NsCommon.ps1` | Shared sign-in/SuiteQL helpers + **copies of the catalog SQL**; `npm test` fails if they drift from `catalog.ts` |
-| `scripts/Invoke-LocalReport.ps1` | Runs one report through the real API code against the sandbox from your PC (secrets from 1Password, no Azure); `api/src/cli.ts` is its entry point |
+| `scripts/NsCommon.ps1` | Shared sign-in/SuiteQL helpers + **copies of the catalog SQL**; `npm test` fails if they drift from `catalog.js` |
+| `scripts/Invoke-LocalReport.ps1` | Runs one report through the real API code against the sandbox from your PC (secrets from 1Password, no Azure); `api/src/cli.js` is its entry point |
 | `docs/IT-request.md` | Draft IT request (not sent) |
 
 ## Design rules
@@ -44,11 +44,11 @@ Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
 ## Run it
 
 ```powershell
-# API tests (mock data)
+# API tests (mock data); plain JavaScript, no build step
 cd api; npm install; npm test
 
-# Add-in: typecheck + build (output in addin/dist)
-cd ../addin; npm install; npm run typecheck; npm run build
+# Add-in: nothing to build. The files in addin/ are deployed as they are.
+# Optional preview (needs Playwright): cd ../addin; npm run preview
 ```
 
 Local API with mock data: copy `api/local.settings.json.sample` to `api/local.settings.json` (gitignored), then `npm start` (needs Azure Functions Core Tools; the SWA CLI supplies the principal header).
@@ -66,7 +66,7 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 - Test 1: PASS. Oct 2026 = 2,230 posting lines, debits = credits = 42,216,073.43. Types visible: CustInvc 142, CustPymt 26, Deposit 11, Journal 545, VendBill 1506. (Deposit View had to be added to `API_User`.)
 - Tests 3a/3b: PASS. Customer and account writes are rejected (HTTP 403): the role is read-only.
 - Test 2: PASS after adding **Manage Accounting Periods (View)** to `API_User` (Period Closing Management / Accounting Management were Full-only and were removed).
-- **Trial Balance: VALIDATED.** By posting period, P&L fiscal YTD, prior-year P&L rolled into the retained-earnings account (`sspecacct = 'RetEarnings'`, 3400) like NetSuite. Footers match NetSuite's TB report (Parent Company Consolidated, book 1) to the cent for Oct 2026 (264,219,967.46) and Jan 2026 (57,483,969.65, across the fiscal-year boundary); three Oct 2026 accounts spot-checked. Jan first differed by exactly 3400's net until RE netting matched NetSuite's. Tested via `scripts/Test-TrialBalance.ps1` (SQL copy, verified identical to `catalog.ts`).
+- **Trial Balance: VALIDATED.** By posting period, P&L fiscal YTD, prior-year P&L rolled into the retained-earnings account (`sspecacct = 'RetEarnings'`, 3400) like NetSuite. Footers match NetSuite's TB report (Parent Company Consolidated, book 1) to the cent for Oct 2026 (264,219,967.46) and Jan 2026 (57,483,969.65, across the fiscal-year boundary); three Oct 2026 accounts spot-checked. Jan first differed by exactly 3400's net until RE netting matched NetSuite's. Tested via `scripts/Test-TrialBalance.ps1` (SQL copy, verified identical to `catalog.js`).
 - SuiteQL facts learned: `BUILTIN.DF` on a derived id returns HTTP 500; `account.accountsearchdisplayname` and `account.sspecacct` exist.
 - NetSuite omits null columns from SuiteQL rows (a credit-only account has no `debit`); the API renders those as 0.00.
 - NetSuite returns SUMs as doubles, sometimes in scientific notation (`4.221607343E7`). The API parses exponents exactly and rounds SUMs to cents in SQL (`ROUND(SUM(..), 2)`, unverified against real SuiteQL until the first API run).
@@ -85,4 +85,4 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 5. **SWA managed Functions time out at ~45 s.** If pulls approach that, switch to client-driven paging.
 6. **Sign-in dialog is unproven inside Excel** (open risk #1): dialog -> `/.auth/login/aad` -> `signin-complete.html` -> `messageParent`.
 7. **Not run yet:** `Invoke-LocalReport.ps1` / the API against real NetSuite (needs Node 20+, admin install on the work PC), the add-in in real Excel, and `npm run validate` (needs internet to Microsoft's validator and real SWA host in the manifest).
-8. **Stack note:** the shared citizen-dev guidance prefers no-build vanilla JS; TypeScript + webpack here is an explicit project decision.
+8. **Stack:** plain HTML, CSS and JavaScript (ES modules) with no build step, per the citizen-dev guidance. The files in `addin/` and `api/` are exactly what gets deployed.

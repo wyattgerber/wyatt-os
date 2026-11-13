@@ -1,20 +1,20 @@
 // Dev-only runner: executes one report through the SAME service code the Azure Function uses
 // (allowlist, validation, paging, reconciliation gate), but from a terminal.
-// Usage: node dist/src/cli.js <report> [key=value ...]
+// Usage: node src/cli.js <report> [key=value ...]
 // Env: CLI_USER_EMAIL (must also be in ALLOWED_USERS), CLI_OUT (optional file for the full JSON), plus the NETSUITE_* settings.
 // Prints a summary only (no row data) so the output is safe to paste; the full result goes to CLI_OUT.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { runService } from './lib/service';
+import { runService } from './lib/service.js';
 
 async function main() {
   const [report, ...kv] = process.argv.slice(2);
   if (!report) {
-    console.error('Usage: node dist/src/cli.js <report> [key=value ...]');
+    console.error('Usage: node src/cli.js <report> [key=value ...]');
     process.exit(2);
   }
-  const params: Record<string, string> = {};
+  const params = {};
   for (const pair of kv) {
     const i = pair.indexOf('=');
     if (i < 1) {
@@ -38,7 +38,7 @@ async function main() {
     console.log(`FAILED (HTTP ${reply.status}) after ${seconds}s:`, JSON.stringify(reply.body));
     process.exit(1);
   }
-  const body = reply.body as { rows: string[][]; columns: { label: string }[]; info: Record<string, unknown> };
+  const body = reply.body;
   console.log(`OK in ${seconds}s. Summary (no row data):`);
   console.log(JSON.stringify({ ...body.info, rowsReturned: body.rows.length }, null, 2));
   console.log('First row:', JSON.stringify(Object.fromEntries(body.columns.map((c, i) => [c.label, body.rows[0]?.[i]]))));

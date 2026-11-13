@@ -1,7 +1,7 @@
 // Sign-in via an Office dialog: /.auth/login/aad -> (Entra) -> /signin-complete.html -> messageParent.
 // OPEN RISK #1: this flow is unproven inside real Excel (cookie sharing between dialog and task pane).
 
-export function signIn(): Promise<void> {
+export function signIn() {
   return new Promise((resolve, reject) => {
     const url = `${location.origin}/.auth/login/aad?post_login_redirect_uri=${encodeURIComponent('/signin-complete.html')}`;
     Office.context.ui.displayDialogAsync(url, { height: 60, width: 30, promptBeforeOpen: false }, (res) => {

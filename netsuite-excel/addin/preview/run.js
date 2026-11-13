@@ -1,16 +1,17 @@
 // DEV-ONLY preview: drives the REAL task pane (addin/dist) in Chromium, with the REAL API service code in
 // mock mode behind /api/*, and office-stub.js in place of office.js. Writes screenshots + findings to preview/out/.
-// Needs: `npm run build` in addin/ and `npm run build` in api/, plus Playwright (`npm i -D playwright` once,
+// No build needed (plain JS). Needs `npm install` in api/ and Playwright (`npm i -D playwright` once,
 // `npx playwright install chromium`). Run: `npm run preview` in addin/. Real Excel still needs the deployed site.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const DIST = path.join(ROOT, 'addin/dist');
+const DIST = path.join(ROOT, 'addin'); // served as-is, exactly as the SWA will serve it
 const OUT = path.join(__dirname, 'out');
 fs.mkdirSync(OUT, { recursive: true });
-const svc = require(path.join(ROOT, 'api/dist/src/lib/service'));
+const { pathToFileURL } = require('url');
+let svc; // the API is ES modules: loaded with import() below
 const env = { NETSUITE_MOCK: 'true', ALLOWED_USERS: 'accountant@example.com' };
 const principal = Buffer.from(JSON.stringify({ userDetails: 'accountant@example.com', userRoles: ['authenticated'] })).toString('base64');
 const stub = fs.readFileSync(path.join(__dirname, 'office-stub.js'), 'utf8');
@@ -19,6 +20,7 @@ const findings = [];
 const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
 
 (async () => {
+  svc = await import(pathToFileURL(path.join(ROOT, 'api/src/lib/service.js')).href);
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 360, height: 760 }, deviceScaleFactor: 2 });
   const errors = [];

@@ -1,18 +1,11 @@
-import { ApiError } from './errors';
-
-export interface Config {
-  mock: boolean;
-  allowedUsers: Set<string>;
-  maxRows: number;
-  netsuite?: { accountId: string; clientId: string; certificateId: string; privateKeyPem: string };
-}
+import { ApiError } from './errors.js';
 
 /** True when running on Azure (SWA managed Functions run on App Service infrastructure). */
-function onAzure(env: NodeJS.ProcessEnv): boolean {
+function onAzure(env) {
   return Boolean(env.WEBSITE_INSTANCE_ID || env.WEBSITE_SITE_NAME);
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+export function loadConfig(env = process.env) {
   const mock = (env.NETSUITE_MOCK ?? '').toLowerCase() === 'true';
   if (mock && onAzure(env)) {
     // Fake data must never be served from a deployed environment.
@@ -27,7 +20,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = Number.parseInt(env.NETSUITE_MAX_ROWS ?? '', 10);
   const maxRows = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 100_000) : 20_000;
 
-  let netsuite: Config['netsuite'];
+  let netsuite;
   if (!mock) {
     const { NETSUITE_ACCOUNT_ID, NETSUITE_CLIENT_ID, NETSUITE_CERTIFICATE_ID, NETSUITE_PRIVATE_KEY } = env;
     if (!NETSUITE_ACCOUNT_ID || !NETSUITE_CLIENT_ID || !NETSUITE_CERTIFICATE_ID || !NETSUITE_PRIVATE_KEY) {

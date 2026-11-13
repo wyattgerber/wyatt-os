@@ -1,13 +1,12 @@
-import { FriendlyError, getMe, getPeriods, getReports, runReport } from './api';
-import { signIn } from './auth';
-import { readSavedPull, writeReport } from './excelWriter';
-import { Period, ReportMeta } from '../types';
+import { FriendlyError, getMe, getPeriods, getReports, runReport } from './api.js';
+import { signIn } from './auth.js';
+import { readSavedPull, writeReport } from './excelWriter.js';
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-let reports: ReportMeta[] = [];
+const $ = (id) => document.getElementById(id);
+let reports = [];
 let busy = false;
 
-function setStatus(msg: string, kind: '' | 'err' | 'ok' = '') {
+function setStatus(msg, kind = '') {
   const el = $('status');
   el.textContent = msg;
   el.className = kind;
@@ -16,18 +15,18 @@ function setStatus(msg: string, kind: '' | 'err' | 'ok' = '') {
 // --- checkpoint the form so a reload / auth redirect does not wipe input ---
 const CK = 'ns.form';
 const saveForm = () => {
-  try { sessionStorage.setItem(CK, JSON.stringify({ report: $<HTMLSelectElement>('report').value, params: readParams() })); } catch { /* storage may be blocked */ }
+  try { sessionStorage.setItem(CK, JSON.stringify({ report: $('report').value, params: readParams() })); } catch { /* storage may be blocked */ }
 };
-const loadForm = (): { report?: string; params?: Record<string, string> } => {
+const loadForm = () => {
   try { return JSON.parse(sessionStorage.getItem(CK) ?? '{}'); } catch { return {}; }
 };
 
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const PERIOD_PARAMS = new Set(['period', 'fromPeriod', 'toPeriod']);
 /** Monthly periods from NetSuite that have started, newest first. Empty if they could not be loaded (falls back to typing). */
-let periods: Period[] = [];
+let periods = [];
 
-function defaultFor(name: string): string {
+function defaultFor(name) {
   const now = new Date();
   if (name === 'startDate') return iso(new Date(now.getFullYear(), now.getMonth(), 1));
   if (name === 'endDate' || name === 'asOfDate') return iso(now);
@@ -41,17 +40,17 @@ function defaultFor(name: string): string {
   return '';
 }
 
-function current(): ReportMeta {
-  return reports.find((r) => r.id === $<HTMLSelectElement>('report').value) ?? reports[0];
+function current() {
+  return reports.find((r) => r.id === $('report').value) ?? reports[0];
 }
 
-function readParams(): Record<string, string> {
-  const out: Record<string, string> = {};
-  $('params').querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select').forEach((i) => { if (i.value.trim()) out[i.name] = i.value.trim(); });
+function readParams() {
+  const out = {};
+  $('params').querySelectorAll('input, select').forEach((i) => { if (i.value.trim()) out[i.name] = i.value.trim(); });
   return out;
 }
 
-function renderParams(values: Record<string, string> = {}) {
+function renderParams(values = {}) {
   const r = current();
   const box = $('params');
   box.replaceChildren();
@@ -59,7 +58,7 @@ function renderParams(values: Record<string, string> = {}) {
     const label = document.createElement('label');
     label.textContent = p.label;
     label.htmlFor = `p_${p.name}`;
-    let input: HTMLInputElement | HTMLSelectElement;
+    let input;
     const value = values[p.name] ?? defaultFor(p.name);
     if (PERIOD_PARAMS.has(p.name) && periods.length > 0) {
       // Pick from NetSuite's real periods: a typo can't produce an empty report.
@@ -86,13 +85,13 @@ function renderParams(values: Record<string, string> = {}) {
   notice.textContent = r.validated ? '' : `Not yet validated against NetSuite reports. ${r.notes[0] ?? ''}`;
 }
 
-function setBusy(b: boolean) {
+function setBusy(b) {
   busy = b;
-  ($('run') as HTMLButtonElement).disabled = b;
-  ($('refresh') as HTMLButtonElement).disabled = b;
+  ($('run')).disabled = b;
+  ($('refresh')).disabled = b;
 }
 
-async function execute(reportId: string, params: Record<string, string>, refresh: boolean) {
+async function execute(reportId, params, refresh) {
   if (busy) return; // guard against double clicks
   setBusy(true);
   setStatus('Pulling from NetSuite... large reports can take up to a minute.');
@@ -126,11 +125,11 @@ async function boot() {
     }
     $('who').textContent = `Signed in as ${me.email}`;
     $('mock').hidden = !me.mock;
-    const [list, per] = await Promise.all([getReports(), getPeriods().catch(() => ({ periods: [] as Period[] }))]);
+    const [list, per] = await Promise.all([getReports(), getPeriods().catch(() => ({ periods: [] }))]);
     const todayIso = new Date().toISOString().slice(0, 10);
     periods = per.periods.filter((p) => p.start <= todayIso).reverse(); // started periods, newest first
     reports = list.reports;
-    const sel = $<HTMLSelectElement>('report');
+    const sel = $('report');
     sel.replaceChildren(...reports.map((r) => new Option(r.title, r.id)));
     const saved = loadForm();
     if (saved.report && reports.some((r) => r.id === saved.report)) sel.value = saved.report;

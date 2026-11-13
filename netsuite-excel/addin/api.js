@@ -1,15 +1,15 @@
-import { Me, Period, ReportResult, ReportsResponse } from '../types';
-
 /** Thrown with a message that is already safe/friendly to show. */
 export class FriendlyError extends Error {
-  constructor(message: string, public status = 0, public code = '') {
+  constructor(message, status = 0, code = '') {
     super(message);
+    this.status = status;
+    this.code = code;
   }
 }
 
-async function call<T>(path: string, init?: RequestInit, retries = 2): Promise<T> {
+async function call(path, init, retries = 2) {
   for (let attempt = 0; ; attempt++) {
-    let res: Response;
+    let res;
     try {
       res = await fetch(path, { credentials: 'include', redirect: 'manual', ...init });
     } catch {
@@ -18,7 +18,7 @@ async function call<T>(path: string, init?: RequestInit, retries = 2): Promise<T
     }
     // An opaque redirect means the platform tried to send us to a login page.
     if (res.type === 'opaqueredirect' || res.status === 401) throw new FriendlyError('Please sign in.', 401, 'UNAUTHENTICATED');
-    if (res.ok) return (await res.json()) as T;
+    if (res.ok) return (await res.json());
     // Only retry transient server errors on safe (idempotent) read calls.
     if (res.status >= 500 && attempt < retries && (init?.method ?? 'GET') === 'GET') {
       await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
@@ -34,9 +34,9 @@ async function call<T>(path: string, init?: RequestInit, retries = 2): Promise<T
   }
 }
 
-export const getMe = () => call<Me>('/api/me');
-export const getReports = () => call<ReportsResponse>('/api/reports');
-export const getPeriods = () => call<{ periods: Period[] }>('/api/periods');
+export const getMe = () => call('/api/me');
+export const getReports = () => call('/api/reports');
+export const getPeriods = () => call('/api/periods');
 /** POST is not auto-retried: a pull is read-only but slow, so the user decides whether to run it again. */
-export const runReport = (report: string, params: Record<string, string>) =>
-  call<ReportResult>('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report, params }) }, 0);
+export const runReport = (report, params) =>
+  call('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report, params }) }, 0);

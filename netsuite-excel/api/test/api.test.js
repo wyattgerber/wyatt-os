@@ -1,19 +1,17 @@
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
-import { getReport, listReports, validateParams } from '../src/lib/catalog';
-import { formatMoney, parseMoney } from '../src/lib/money';
-import { principalFromHeader } from '../src/lib/auth';
-import { MockProvider } from '../src/lib/mock';
-import { runReport } from '../src/lib/runReport';
-import { meService, periodsService, reportsService, runService } from '../src/lib/service';
-import { buildClientAssertion } from '../src/lib/netsuite';
-import { BuiltQuery, QueryProvider } from '../src/lib/types';
+import { getReport, listReports, validateParams } from '../src/lib/catalog.js';
+import { formatMoney, parseMoney } from '../src/lib/money.js';
+import { principalFromHeader } from '../src/lib/auth.js';
+import { MockProvider } from '../src/lib/mock.js';
+import { runReport } from '../src/lib/runReport.js';
+import { meService, periodsService, reportsService, runService } from '../src/lib/service.js';
+import { buildClientAssertion } from '../src/lib/netsuite.js';
 
-const principal = (email: string) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
-const ENV = { NETSUITE_MOCK: 'true', ALLOWED_USERS: 'ann@example.com, bob@example.com' } as NodeJS.ProcessEnv;
+const principal = (email) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
+const ENV = { NETSUITE_MOCK: 'true', ALLOWED_USERS: 'ann@example.com, bob@example.com' };
 const OCT = { fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026' };
 
 test('money: exact BigInt parse/format, no float drift, fails closed', () => {
@@ -44,7 +42,7 @@ test('params: unknown, malformed and injected values are rejected', () => {
 });
 
 test('catalog: every row query has ORDER BY; SQL is built only from validated values', () => {
-  const samples: Record<string, Record<string, string>> = {
+  const samples = {
     trial_balance: { period: 'Oct 2026' },
     journal_entries: OCT,
     gl_detail: { ...OCT, account: '1000' },
@@ -78,10 +76,10 @@ test('/api/me and /api/reports: allowlist enforced server-side', async () => {
 });
 
 test('run: mock GL pull pages 3x, reconciles, is balanced, and writes an AUDIT line', async () => {
-  const logs: string[] = [];
+  const logs = [];
   const r = await runService(principal('ann@example.com'), JSON.stringify({ report: 'gl_detail', params: OCT }), { env: ENV, log: (m) => logs.push(m) });
   assert.equal(r.status, 200);
-  const body = r.body as { rows: string[][]; info: { rowCount: number; balanced: boolean; reconciliation: string; mock: boolean; user: string } };
+  const body = r.body;
   assert.equal(body.rows.length, 2500); // > 1,000 so it exercised multiple pages
   assert.equal(body.info.rowCount, 2500);
   assert.equal(body.info.balanced, true);
@@ -93,7 +91,7 @@ test('run: mock GL pull pages 3x, reconciles, is balanced, and writes an AUDIT l
 });
 
 test('run: request body cannot carry SQL, extra fields, or identity', async () => {
-  const send = (b: unknown) => runService(principal('ann@example.com'), JSON.stringify(b), { env: ENV });
+  const send = (b) => runService(principal('ann@example.com'), JSON.stringify(b), { env: ENV });
   assert.equal((await send({ report: 'gl_detail', params: OCT, sql: 'SELECT 1' })).status, 400);
   assert.equal((await send({ report: 'gl_detail', params: OCT, user: 'bob@example.com' })).status, 400);
   assert.equal((await send({ report: 'nope', params: {} })).status, 404);
@@ -106,14 +104,16 @@ test('run: row cap is enforced before paging', async () => {
     env: { ...ENV, NETSUITE_MAX_ROWS: '100' },
   });
   assert.equal(r.status, 413);
-  assert.equal((r.body as { error: { code: string } }).error.code, 'TOO_MANY_ROWS');
+  assert.equal((r.body).error.code, 'TOO_MANY_ROWS');
 });
 
-class Tampered implements QueryProvider {
+class Tampered {
   inner = new MockProvider();
   totalsCalls = 0;
-  constructor(private mode: 'drop-row' | 'change-amount' | 'totals-move') {}
-  async query(q: BuiltQuery, offset: number, limit: number) {
+  constructor(mode) {
+    this.mode = mode;
+  }
+  async query(q, offset, limit) {
     const res = await this.inner.query(q, offset, limit);
     if (q.kind === 'totals') {
       if (this.mode === 'totals-move' && ++this.totalsCalls === 2) res.items[0] = { ...res.items[0], cnt: String(Number(res.items[0].cnt) + 1) };
@@ -127,10 +127,10 @@ class Tampered implements QueryProvider {
 
 test('reconciliation gate: a dropped row, a changed amount, or moving totals all refuse to return data', async () => {
   const def = getReport('gl_detail');
-  for (const [mode, code] of [['drop-row', 'RECONCILIATION_FAILED'], ['change-amount', 'RECONCILIATION_FAILED'], ['totals-move', 'DATA_CHANGED']] as const) {
+  for (const [mode, code] of [['drop-row', 'RECONCILIATION_FAILED'], ['change-amount', 'RECONCILIATION_FAILED'], ['totals-move', 'DATA_CHANGED']]) {
     await assert.rejects(
       runReport(def, OCT, new Tampered(mode), { maxRows: 20000, user: 'ann@example.com', mock: true }),
-      (e: { code?: string }) => e.code === code,
+      (e) => e.code === code,
       mode,
     );
   }
@@ -139,8 +139,8 @@ test('reconciliation gate: a dropped row, a changed amount, or moving totals all
 test('AR aging: buckets use US Eastern today and always sum to the open amount', async () => {
   // 2026-11-13 03:00 UTC is still 2026-11-12 in New York.
   const res = await runReport(getReport('ar_aging'), {}, new MockProvider(), { maxRows: 100, user: 'x', mock: true, now: new Date('2026-11-13T03:00:00Z') });
-  const idx = (k: string) => res.columns.findIndex((c) => c.key === k);
-  const inv2001 = res.rows.find((r) => r[idx('tranid')] === 'INV2001')!;
+  const idx = (k) => res.columns.findIndex((c) => c.key === k);
+  const inv2001 = res.rows.find((r) => r[idx('tranid')] === 'INV2001');
   assert.equal(inv2001[idx('dayspastdue')], '104'); // due 2026-07-31 -> 2026-11-12
   assert.equal(inv2001[idx('d90plus')], '1250.50');
   assert.equal(inv2001[idx('current')], '0.00');
@@ -169,7 +169,7 @@ test('config: mock is refused on Azure; real mode without NetSuite settings fail
   const onAzure = await meService(principal('ann@example.com'), { env: { ...ENV, WEBSITE_INSTANCE_ID: 'abc' } });
   assert.equal(onAzure.status, 500);
   const unconfigured = await runService(principal('ann@example.com'), JSON.stringify({ report: 'ar_aging' }), {
-    env: { ALLOWED_USERS: 'ann@example.com' } as NodeJS.ProcessEnv,
+    env: { ALLOWED_USERS: 'ann@example.com' },
   });
   assert.equal(unconfigured.status, 503);
 });
@@ -190,14 +190,14 @@ test('trial balance: by posting period, FYTD P&L, prior-year P&L into the RE acc
   assert.doesNotMatch(rows, /BUILTIN\.DF/, 'BUILTIN.DF on a derived id fails in SuiteQL');
   const r = await runService(principal('ann@example.com'), JSON.stringify({ report: 'trial_balance', params: { period: 'Oct 2026' } }), { env: ENV });
   assert.equal(r.status, 200);
-  const body = r.body as { info: { balanced: boolean } };
+  const body = r.body;
   assert.equal(body.info.balanced, true); // every transaction balances, so a cumulative TB must too
 });
 
 test('NetSuite omits null columns: missing debit/credit read as 0.00 and still reconcile', async () => {
-  class OmitsZeros implements QueryProvider {
+  class OmitsZeros {
     inner = new MockProvider();
-    async query(q: BuiltQuery, offset: number, limit: number) {
+    async query(q, offset, limit) {
       const res = await this.inner.query(q, offset, limit);
       if (q.kind === 'rows') {
         for (const it of res.items) for (const k of ['debit', 'credit']) if (it[k] === '0.00') delete it[k]; // like NetSuite's null omission
@@ -230,9 +230,9 @@ test('GL / JE: filter on posting period range (same basis as the TB), period col
 
 // The PowerShell test scripts carry a copy of the SQL (they cannot import TypeScript). Evaluate the
 // simple string assignments between BEGIN-SQL/END-SQL in scripts/NsCommon.ps1 and require an exact match.
-test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
-  const src = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'NsCommon.ps1'), 'utf8');
-  const evalBlock = (tag: string, vars: Record<string, string>) => {
+test('scripts/NsCommon.ps1 SQL copies are identical to catalog.js', () => {
+  const src = readFileSync(new URL('../../scripts/NsCommon.ps1', import.meta.url), 'utf8');
+  const evalBlock = (tag, vars) => {
     let blk = src.slice(src.indexOf(`# BEGIN-SQL ${tag}`) + `# BEGIN-SQL ${tag}`.length, src.indexOf(`# END-SQL ${tag}`));
     blk = blk.replace(/"\s*\+\s*\n\s*"/g, '').replace(/'\s*\+\s*\n\s*'/g, '');
     for (const line of blk.split('\n').map((l) => l.trim()).filter(Boolean)) {
@@ -242,7 +242,7 @@ test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
       for (const p of m[2].matchAll(/'((?:[^']|'')*)'|"([^"]*)"|\$(\w+)/g)) {
         if (p[3] !== undefined) out += vars[p[3]];
         else if (p[1] !== undefined) out += p[1].replace(/''/g, "'");
-        else out += p[2].replace(/\$(\w+)/g, (_, v: string) => vars[v]);
+        else out += p[2].replace(/\$(\w+)/g, (_, v) => vars[v]);
       }
       vars[m[1]] = out;
     }
@@ -265,7 +265,7 @@ test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
   for (const [id, vars] of [
     ['ar_aging', { kindName: 'AcctRec', docType: 'CustInvc', credits: "'CustCred', 'CustPymt'", noName: '- No Customer -', lineAmt: '(NVL(tal.debit, 0) - NVL(tal.credit, 0))' }],
     ['ap_aging', { kindName: 'AcctPay', docType: 'VendBill', credits: "'VendCred', 'VendPymt'", noName: '- No Vendor -', lineAmt: '(NVL(tal.credit, 0) - NVL(tal.debit, 0))' }],
-  ] as const) {
+  ]) {
     const ag = evalBlock('aging', { ...vars });
     const agTs = getReport(id).build({});
     assert.equal(ag.totalsSql, agTs.totals, `${id} totals`);
@@ -278,7 +278,7 @@ test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
 });
 
 test('aging: verified fields only, journals at full amount, named "no customer/vendor", ties to control account', async () => {
-  for (const [id, kind, noName] of [['ar_aging', 'AcctRec', '- No Customer -'], ['ap_aging', 'AcctPay', '- No Vendor -']] as const) {
+  for (const [id, kind, noName] of [['ar_aging', 'AcctRec', '- No Customer -'], ['ap_aging', 'AcctPay', '- No Vendor -']]) {
     const { totals, rows } = getReport(id).build({});
     for (const sql of [totals, rows]) {
       assert.doesNotMatch(sql, /[^n]amountunpaid|[^n]paymentamountunused|amountremaining/, 'only foreign* fields exist (amountunpaid etc. return HTTP 500)');
@@ -288,9 +288,9 @@ test('aging: verified fields only, journals at full amount, named "no customer/v
     assert.match(rows, new RegExp(noName));
   }
   // The control-account tie fails closed.
-  class Untied implements QueryProvider {
+  class Untied {
     inner = new MockProvider();
-    async query(q: BuiltQuery, offset: number, limit: number) {
+    async query(q, offset, limit) {
       const res = await this.inner.query(q, offset, limit);
       if (q.kind === 'totals') res.items[0] = { ...res.items[0], control: '1.00' };
       return res;
@@ -298,22 +298,22 @@ test('aging: verified fields only, journals at full amount, named "no customer/v
   }
   await assert.rejects(
     runReport(getReport('ar_aging'), {}, new Untied(), { maxRows: 100, user: 'x', mock: true }),
-    (e: { code?: string; message?: string }) => e.code === 'RECONCILIATION_FAILED' && /control account/.test(e.message ?? ''),
+    (e) => e.code === 'RECONCILIATION_FAILED' && /control account/.test(e.message ?? ''),
   );
 });
 
 test('periods: /api/periods lists real periods; runs reject unknown names and reversed ranges', async () => {
   const r = await periodsService(principal('ann@example.com'), { env: ENV });
   assert.equal(r.status, 200);
-  const names = (r.body as { periods: { name: string }[] }).periods.map((p) => p.name);
+  const names = (r.body).periods.map((p) => p.name);
   assert.ok(names.includes('Oct 2026') && names.includes('Jan 2026'));
   assert.equal((await periodsService(principal('eve@example.com'), { env: ENV })).status, 403);
-  const run = (params: Record<string, string>) =>
+  const run = (params) =>
     runService(principal('ann@example.com'), JSON.stringify({ report: 'gl_detail', params }), { env: ENV });
   const typo = await run({ fromPeriod: 'Okt 2026', toPeriod: 'Oct 2026' });
   assert.equal(typo.status, 400);
-  assert.equal((typo.body as { error: { code: string } }).error.code, 'UNKNOWN_PERIOD');
+  assert.equal((typo.body).error.code, 'UNKNOWN_PERIOD');
   const reversed = await run({ fromPeriod: 'Oct 2026', toPeriod: 'Sep 2026' });
-  assert.equal((reversed.body as { error: { code: string } }).error.code, 'BAD_RANGE');
+  assert.equal((reversed.body).error.code, 'BAD_RANGE');
   assert.equal((await run({ fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' })).status, 200);
 });

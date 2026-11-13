@@ -8,7 +8,7 @@
   Nothing secret is written to disk or printed. The full result (financial data) is written to api\out\
   which is gitignored -- do not copy it into the repo or share it.
 
-  Needs Node 20+ (node -v). The first run installs dependencies and builds the API.
+  Needs Node 20+ (node -v). The API is plain JavaScript, so there is nothing to build or install.
   Keep the 1Password app unlocked. Do not call `op whoami` in this script (it breaks the next op call here).
 
 .EXAMPLE
@@ -32,16 +32,7 @@ if (-not (Get-Command op -ErrorAction SilentlyContinue)) { throw "1Password CLI 
 if ([string]::IsNullOrWhiteSpace($User)) { throw 'Pass -User <your work email> (it must match what you sign in with; it is only used for the audit line here).' }
 
 $apiDir = Join-Path $PSScriptRoot '..\api' | Resolve-Path
-$cli = Join-Path $apiDir 'dist\src\cli.js'
-if (-not (Test-Path -LiteralPath $cli)) {
-    Write-Host 'First run: installing dependencies and building the API...'
-    Push-Location $apiDir
-    try {
-        npm install --no-audit --no-fund; if ($LASTEXITCODE -ne 0) { throw 'npm install failed.' }
-        npm run build; if ($LASTEXITCODE -ne 0) { throw 'npm run build failed.' }
-    }
-    finally { Pop-Location }
-}
+$cli = Join-Path $apiDir 'src\cli.js'   # plain JavaScript: no build or install needed to run a report
 
 function Get-OpField([string]$Field) {
     $v = op read "op://$Vault/$Item/$Field" 2>&1

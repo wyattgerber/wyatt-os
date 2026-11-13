@@ -1,8 +1,8 @@
 # Shared helpers for the NetSuite test scripts. Dot-source it:  . "$PSScriptRoot/NsCommon.ps1"
 # Secrets come from 1Password; the private key is used once to get a token and then dropped. Nothing secret is printed.
 #
-# !! The SQL builders below are COPIES of api/src/lib/catalog.ts (PowerShell cannot import TypeScript).
-# !! They are checked against catalog.ts mechanically; keep the BEGIN-SQL/END-SQL blocks to simple assignments.
+# !! The SQL builders below are COPIES of api/src/lib/catalog.js (PowerShell cannot import JavaScript modules).
+# !! They are checked against catalog.js mechanically; keep the BEGIN-SQL/END-SQL blocks to simple assignments.
 
 $script:inv = [System.Globalization.CultureInfo]::InvariantCulture
 
@@ -77,7 +77,7 @@ function Get-AllRows($Conn, [string]$Sql, [int]$Expected) {
     return , $all
 }
 
-# ---------------- SQL builders (copies of catalog.ts) ----------------
+# ---------------- SQL builders (copies of catalog.js) ----------------
 
 function Get-LineSql([string]$From, [string]$To, [string]$ExtraWhere = '') {
     # BEGIN-SQL line

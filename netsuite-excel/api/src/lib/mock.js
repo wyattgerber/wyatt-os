@@ -1,25 +1,8 @@
 // Fake data for local dev and tests ONLY (NETSUITE_MOCK=true). Deterministic. Balanced debits = credits.
 
-import { formatMoney, parseMoney } from './money';
-import { BuiltQuery, QueryProvider } from './types';
+import { formatMoney, parseMoney } from './money.js';
 
-interface Line {
-  trandate: string;
-  trantype: string;
-  tranid: string;
-  id: number;
-  lineno: number;
-  acctnumber: string;
-  acctname: string;
-  accttype: string;
-  entityname: string;
-  subsidiary: string;
-  memo: string;
-  debit: bigint;
-  credit: bigint;
-}
-
-const ACCOUNTS: [string, string, string][] = [
+const ACCOUNTS = [
   ['1000', 'Cash', 'Bank'],
   ['1200', 'Accounts Receivable', 'AcctRec'],
   ['2000', 'Accounts Payable', 'AcctPay'],
@@ -30,13 +13,13 @@ const ACCOUNTS: [string, string, string][] = [
 const TYPES = ['Journal', 'CustInvc', 'VendBill'];
 const MICRO = 1_000_000n;
 
-function buildLines(txns: number): Line[] {
+function buildLines(txns) {
   let seed = 12345;
-  const rnd = (n: number) => {
+  const rnd = (n) => {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed % n;
   };
-  const out: Line[] = [];
+  const out = [];
   for (let i = 1; i <= txns; i++) {
     const day = 1 + (i % 31);
     const date = `2026-10-${String(day).padStart(2, '0')}`;
@@ -48,7 +31,7 @@ function buildLines(txns: number): Line[] {
     for (const [lineno, acct, debit, credit] of [
       [1, a, amt, 0n],
       [2, b, 0n, amt],
-    ] as [number, [string, string, string], bigint, bigint][]) {
+    ]) {
       out.push({
         trandate: date, trantype: type, tranid: `${type === 'Journal' ? 'JE' : type === 'CustInvc' ? 'INV' : 'BILL'}${1000 + i}`,
         id: i, lineno, acctnumber: acct[0], acctname: acct[1], accttype: acct[2],
@@ -68,44 +51,44 @@ const OPEN_AR = [
   ['Mock Co 2', 'CustInvc', 'INV2002', '2026-09-15', '2026-10-15', 980],
   ['Mock Co 2', 'CustInvc', 'INV2003', '2026-10-20', '2026-11-19', 4000.25],
   ['Mock Co 3', 'CustPymt', 'PYMT2004', '2026-10-01', '2026-10-01', -300],
-] as const;
+];
 const OPEN_AP = [
   ['Mock Vendor A', 'VendBill', 'BILL3001', '2026-08-01', '2026-08-31', 760.4],
   ['Mock Vendor B', 'VendBill', 'BILL3002', '2026-10-25', '2026-11-24', 2210],
-] as const;
+];
 
 /** Mock only: "Oct 2026" -> "2026-10-01". */
-function mockPeriodStart(period: string): string {
+function mockPeriodStart(period) {
   return `${mockPeriodEnd(period).slice(0, 8)}01`;
 }
 
 /** Mock only: "2026-10-15" -> "Oct 2026". */
-function mockPeriodName(iso: string): string {
+function mockPeriodName(iso) {
   return new Date(`${iso}T00:00:00Z`).toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
 /** Mock only: "Oct 2026" -> "2026-10-31". Ignores fiscal-year / retained-earnings logic (real SQL does that). */
-function mockPeriodEnd(period: string): string {
+function mockPeriodEnd(period) {
   const d = new Date(`${period} 1 UTC`);
   if (Number.isNaN(d.getTime())) throw new Error('mock: unknown period');
   const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
   return end.toISOString().slice(0, 10);
 }
 
-const sumOf = (xs: bigint[]) => xs.reduce((a, b) => a + b, 0n);
+const sumOf = (xs) => xs.reduce((a, b) => a + b, 0n);
 
-export class MockProvider implements QueryProvider {
-  async query(q: BuiltQuery, offset: number, limit: number) {
+export class MockProvider {
+  async query(q, offset, limit) {
     const rows = this.allRows(q);
     if (q.kind === 'totals') return { items: [this.totals(q, rows)], hasMore: false };
     const items = rows.slice(offset, offset + limit);
     return { items, hasMore: offset + limit < rows.length };
   }
 
-  private moneyStr = (n: bigint) => formatMoney(n);
+          moneyStr = (n) => formatMoney(n);
 
-  private totals(q: BuiltQuery, rows: Record<string, unknown>[]): Record<string, unknown> {
-    const col = (k: string) => sumOf(rows.map((r) => parseMoney(r[k])));
+          totals(q, rows) {
+    const col = (k) => sumOf(rows.map((r) => parseMoney(r[k])));
     if (q.report === 'ar_aging' || q.report === 'ap_aging') {
       const open = this.moneyStr(col('openamount'));
       return { cnt: String(rows.length), openamount: open, control: open };
@@ -113,12 +96,12 @@ export class MockProvider implements QueryProvider {
     return { cnt: String(rows.length), debits: this.moneyStr(col('debit')), credits: this.moneyStr(col('credit')) };
   }
 
-  private allRows(q: BuiltQuery): Record<string, unknown>[] {
+          allRows(q) {
     const p = q.params;
     const m = this.moneyStr;
     switch (q.report) {
       case 'trial_balance': {
-        const byAcct = new Map<string, { l: Line; d: bigint; c: bigint }>();
+        const byAcct = new Map();
         for (const l of LINES.filter((x) => x.trandate <= mockPeriodEnd(p.period))) {
           const e = byAcct.get(l.acctnumber) ?? { l, d: 0n, c: 0n };
           e.d += l.debit;
@@ -152,7 +135,7 @@ export class MockProvider implements QueryProvider {
         }));
       }
       case 'periods': {
-        const out: Record<string, unknown>[] = [];
+        const out = [];
         for (let y = 2025; y <= 2027; y++) {
           for (let m = 0; m < 12; m++) {
             const start = new Date(Date.UTC(y, m, 1));

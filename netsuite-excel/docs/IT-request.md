@@ -8,6 +8,7 @@
 
 ### 1. Azure Static Web App (citizen-app platform)
 - One SWA instance with managed Functions (Node 20) under `/api`, deployed from the GitHub repo (see 5).
+- **No build step:** plain HTML/CSS/JavaScript. SWA build settings: `app_location: netsuite-excel/addin`, `api_location: netsuite-excel/api`, `output_location: ""` (empty), app build skipped. The API is ES modules (`"type": "module"`) with one dependency (`@azure/functions`).
 - **Sign-in restricted to the Nussbaum Entra tenant** (Easy Auth with Microsoft Entra ID). If that needs the Standard plan or a custom auth config, please use it.
 - **App settings** (values are in 1Password; see 4 for handover):
 

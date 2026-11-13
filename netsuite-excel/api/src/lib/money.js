@@ -8,9 +8,9 @@ const FACTOR = 10n ** BigInt(SCALE);
  * Accepts scientific notation ("3.572068025E7"), which NetSuite has been seen to return, exactly (no floats).
  * Throws if the value has more than 6 decimal places.
  */
-export function parseMoney(v: unknown): bigint {
+export function parseMoney(v) {
   if (v === null || v === undefined || v === '') return 0n;
-  let s: string;
+  let s;
   if (typeof v === 'number') {
     if (!Number.isFinite(v)) throw new Error('Non-finite money value');
     s = String(v);
@@ -26,7 +26,7 @@ export function parseMoney(v: unknown): bigint {
   if (!Number.isSafeInteger(exp) || Math.abs(exp) > 40) throw new Error('Unreasonable money exponent');
   const digits = BigInt(m[2] + fracDigits);
   const shift = SCALE + exp - fracDigits.length; // value * 10^SCALE = digits * 10^shift
-  let n: bigint;
+  let n;
   if (shift >= 0) {
     n = digits * 10n ** BigInt(shift);
   } else {
@@ -38,7 +38,7 @@ export function parseMoney(v: unknown): bigint {
 }
 
 /** Micro-units to a decimal string with at least 2 decimals (more only if non-zero). */
-export function formatMoney(n: bigint): string {
+export function formatMoney(n) {
   const neg = n < 0n;
   const abs = neg ? -n : n;
   const whole = abs / FACTOR;

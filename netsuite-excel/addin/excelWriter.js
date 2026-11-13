@@ -4,26 +4,24 @@
 //  - the table starts at A1 with its header frozen; a Pull Info block sits to the right of it;
 //  - report id + parameters are saved as worksheet custom properties (ExcelApi 1.12) so Refresh can re-run.
 
-import { Column, ReportResult } from '../types';
-
 const BATCH = 5000;
-const FORMATS: Record<Column['type'], string> = {
+const FORMATS = {
   text: '@',
   date: 'yyyy-mm-dd',
   money: '#,##0.00;(#,##0.00)',
   int: '0',
 };
-const SHORT: Record<string, string> = { trial_balance: 'TB', journal_entries: 'JE', gl_detail: 'GL', ar_aging: 'AR', ap_aging: 'AP' };
+const SHORT = { trial_balance: 'TB', journal_entries: 'JE', gl_detail: 'GL', ar_aging: 'AR', ap_aging: 'AP' };
 export const PROP_REPORT = 'ns.report';
 export const PROP_PARAMS = 'ns.params';
 
-function isoToSerial(s: string): number | string {
+function isoToSerial(s) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return s; // show whatever came back rather than hide it
   return Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86_400_000 + 25569;
 }
 
-function toCell(c: Column, v: string): string | number {
+function toCell(c, v) {
   if (v === '') return '';
   switch (c.type) {
     case 'date': return isoToSerial(v);
@@ -33,9 +31,9 @@ function toCell(c: Column, v: string): string | number {
   }
 }
 
-const pad = (n: number) => String(n).padStart(2, '0');
+const pad = (n) => String(n).padStart(2, '0');
 
-function sheetNameFor(result: ReportResult, existing: Set<string>): string {
+function sheetNameFor(result, existing) {
   const d = new Date();
   const base = `${SHORT[result.info.report] ?? 'NS'} ${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
   let name = base;
@@ -43,7 +41,7 @@ function sheetNameFor(result: ReportResult, existing: Set<string>): string {
   return name;
 }
 
-function easternTime(isoUtc: string): string {
+function easternTime(isoUtc) {
   try {
     return new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric',
@@ -54,9 +52,9 @@ function easternTime(isoUtc: string): string {
   }
 }
 
-function infoRows(r: ReportResult): [string, string | number, 'text' | 'money' | 'int'][] {
+function infoRows(r) {
   const i = r.info;
-  const rows: [string, string | number, 'text' | 'money' | 'int'][] = [
+  const rows = [
     ['NetSuite pull', i.title, 'text'],
     ['Parameters', Object.entries(i.params).map(([k, v]) => `${k}=${v}`).join('; ') || '(none)', 'text'],
     ['Pulled by', i.user, 'text'],
@@ -73,7 +71,7 @@ function infoRows(r: ReportResult): [string, string | number, 'text' | 'money' |
   return rows;
 }
 
-async function setProp(context: Excel.RequestContext, sheet: Excel.Worksheet, key: string, value: string) {
+async function setProp(context, sheet, key, value) {
   const p = sheet.customProperties.getItemOrNullObject(key);
   p.load('isNullObject');
   await context.sync();
@@ -82,10 +80,10 @@ async function setProp(context: Excel.RequestContext, sheet: Excel.Worksheet, ke
 }
 
 /** Writes the result to a NEW sheet, or over the active sheet when `refresh` is true. Returns the sheet name. */
-export async function writeReport(result: ReportResult, refresh = false): Promise<string> {
+export async function writeReport(result, refresh = false) {
   return Excel.run(async (context) => {
     const sheets = context.workbook.worksheets;
-    let sheet: Excel.Worksheet;
+    let sheet;
     if (refresh) {
       sheet = sheets.getActiveWorksheet();
       sheet.tables.load('items');
@@ -147,7 +145,7 @@ export async function writeReport(result: ReportResult, refresh = false): Promis
 }
 
 /** Report + parameters saved on the active sheet by a previous pull, or null. */
-export async function readSavedPull(): Promise<{ report: string; params: Record<string, string> } | null> {
+export async function readSavedPull() {
   return Excel.run(async (context) => {
     const sheet = context.workbook.worksheets.getActiveWorksheet();
     const r = sheet.customProperties.getItemOrNullObject(PROP_REPORT);
@@ -157,7 +155,7 @@ export async function readSavedPull(): Promise<{ report: string; params: Record<
     await context.sync();
     if (r.isNullObject || p.isNullObject) return null;
     try {
-      const params = JSON.parse(p.value) as Record<string, string>;
+      const params = JSON.parse(p.value);
       return { report: r.value, params };
     } catch {
       return null;
