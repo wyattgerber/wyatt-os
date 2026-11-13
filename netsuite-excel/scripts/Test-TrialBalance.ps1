@@ -23,7 +23,9 @@ param(
     [string]$Item = 'Excel Addin Connection',
     # Diagnostics: pass NetSuite's report footer (net debit total) to see the gap and which accounts could explain it.
     [decimal]$NetSuiteFooter = -1,
-    [switch]$ShowEquity
+    [switch]$ShowEquity,
+    # Probe how the retained-earnings account can be identified (account columns are unverified), then exit.
+    [switch]$ProbeRetainedEarnings
 )
 
 Set-StrictMode -Version Latest
@@ -66,6 +68,24 @@ try {
         [pscustomobject]@{ Status = $sc; Body = $r }
     }
     function Show-Fail([string]$What, $r) { Write-Host "[FAIL] $What - HTTP $($r.Status): $(if ($r.Body -is [string]) { $r.Body } else { $r.Body | ConvertTo-Json -Depth 5 -Compress })" -ForegroundColor Red }
+
+    if ($ProbeRetainedEarnings) {
+        Write-Host 'Probing the account table (each query is independent, so one bad column does not hide the others):'
+        $probes = [ordered]@{
+            'acctnumber/accttype of 3400'            = "SELECT id, acctnumber, accttype FROM account WHERE acctnumber = '3400'"
+            'sspecacct (special account type) col'  = "SELECT id, acctnumber, sspecacct FROM account WHERE sspecacct = 'RetEarnings'"
+            'distinct sspecacct values'             = "SELECT sspecacct, COUNT(*) AS n FROM account WHERE sspecacct IS NOT NULL GROUP BY sspecacct ORDER BY sspecacct"
+            'accountsearchdisplayname col'          = "SELECT id, accountsearchdisplayname FROM account WHERE acctnumber = '3400'"
+            'fullname col'                          = "SELECT id, fullname FROM account WHERE acctnumber = '3400'"
+            'BUILTIN.DF on a derived id'            = "SELECT BUILTIN.DF(x.rid) AS nm FROM (SELECT MAX(id) AS rid FROM account WHERE acctnumber = '3400') x"
+        }
+        foreach ($k in $probes.Keys) {
+            $pr = Invoke-SuiteQL $probes[$k]
+            if ($pr.Status -eq 200) { Write-Host "[OK]   $k -> $($pr.Body.items | ConvertTo-Json -Compress -Depth 4)" -ForegroundColor Green }
+            else { Write-Host "[FAIL] $k -> HTTP $($pr.Status): $(if ($pr.Body -is [string]) { $pr.Body } else { ($pr.Body.'o:errorDetails'.detail) })" -ForegroundColor Red }
+        }
+        exit 0
+    }
 
     # ---- 1) the period ----
     $r = Invoke-SuiteQL "SELECT id, periodname, startdate, enddate, isyear, isquarter FROM accountingperiod WHERE periodname = '$Period'"
