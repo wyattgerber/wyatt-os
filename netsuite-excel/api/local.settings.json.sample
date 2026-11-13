@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsStorage": "",
+    "NETSUITE_MOCK": "true",
+    "ALLOWED_USERS": "you@example.com",
+    "NETSUITE_MAX_ROWS": "20000"
+  }
+}

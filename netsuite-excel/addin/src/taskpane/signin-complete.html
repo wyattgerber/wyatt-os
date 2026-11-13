@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signed in</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+</head>
+<body style="font-family: Segoe UI, sans-serif; padding: 24px">
+  <p id="m">Signed in. You can close this window.</p>
+  <script>
+    Office.onReady(function () {
+      try { Office.context.ui.messageParent('signed-in'); }
+      catch (e) { document.getElementById('m').textContent = 'Signed in, but could not notify Excel. Close this window and try again.'; }
+    });
+  </script>
+</body>
+</html>

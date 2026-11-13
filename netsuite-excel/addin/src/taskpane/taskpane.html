@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetSuite Reports</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    :root { --bg:#faf9f5; --fg:#1f1e1d; --muted:#6b6a68; --line:#e5e3dc; --accent:#c96442; --err:#b3261e; --ok:#2e6b3a; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#262624; --fg:#f0eee6; --muted:#a8a69e; --line:#3d3c39; --accent:#d97757; --err:#f2b8b5; --ok:#8fcf9b; } }
+    body { margin:0; padding:14px; background:var(--bg); color:var(--fg); font:14px/1.45 "Segoe UI", system-ui, sans-serif; }
+    h1 { font-size:16px; margin:0 0 10px; }
+    label { display:block; margin:10px 0 3px; font-weight:600; font-size:13px; }
+    select, input { width:100%; box-sizing:border-box; padding:7px 8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:inherit; font:inherit; }
+    button { padding:8px 12px; border:1px solid var(--accent); border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+    button.secondary { background:transparent; color:var(--accent); }
+    button:disabled { opacity:.5; cursor:default; }
+    .row { display:flex; gap:8px; margin-top:14px; }
+    .mock { background:#b3261e; color:#fff; padding:6px 10px; margin:-14px -14px 12px; font-weight:700; text-align:center; }
+    .warn { border:1px solid var(--accent); border-radius:6px; padding:8px 10px; margin:10px 0; font-size:13px; }
+    .muted { color:var(--muted); font-size:12px; }
+    #status { margin-top:12px; min-height:20px; }
+    #status.err { color:var(--err); } #status.ok { color:var(--ok); }
+    [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <div id="mock" class="mock" hidden>MOCK DATA - FAKE NUMBERS, DEVELOPMENT ONLY</div>
+  <h1>NetSuite Reports</h1>
+
+  <section id="signin" hidden>
+    <p>Sign in with your work account to use NetSuite reports.</p>
+    <button id="signinBtn">Sign in</button>
+  </section>
+
+  <section id="main" hidden>
+    <label for="report">Report</label>
+    <select id="report"></select>
+    <div id="notice" class="warn" hidden></div>
+    <div id="params"></div>
+    <div class="row">
+      <button id="run">Pull report</button>
+      <button id="refresh" class="secondary" title="Re-runs this sheet's report and replaces the sheet's contents">Refresh this sheet</button>
+    </div>
+    <p class="muted">Read-only. Pulls open in a new sheet; Refresh replaces the contents of the sheet you are on.</p>
+  </section>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="who" class="muted"></div>
+</body>
+</html>

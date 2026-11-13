@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+local.settings.json
+.env
+.env.*
+# Never commit keys or certificates (the public cert lives next to where you ran the script)
+*.pem
+*.key
+*.pfx
+*.bundle
