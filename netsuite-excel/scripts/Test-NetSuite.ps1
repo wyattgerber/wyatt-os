@@ -21,7 +21,7 @@ param(
     [string]$Vault = 'NetSuite',
     [string]$Item = 'NetSuite Sandbox M2M',
     [int]$ExpectedCount = 2230,
-    [decimal]$ExpectedAmount = 42216073.43,
+    [decimal]$ExpectedAmount = 42216073.43d,  # 'd' = real decimal literal; a plain 42216073.43 is a double and picks up float noise
     [string]$StartDate = '2026-10-01',
     [string]$EndDate = '2026-10-31',
     [switch]$SkipWriteTests
@@ -116,7 +116,6 @@ try {
         $ok = ($cnt -eq $ExpectedCount) -and ($dr -eq $ExpectedAmount) -and ($cr -eq $ExpectedAmount)
         Write-Host "Raw from NetSuite: cnt=$($row.cnt) debits=$($row.debits) credits=$($row.credits)"
         if (($d -ne $dr) -or ($c -ne $cr)) { Write-Host 'NOTE: raw sums have more than 2 decimals (floating-point noise). The API rounds totals to cents to compare.' -ForegroundColor Yellow }
-        Write-Host "DEBUG compare: count=$($cnt -eq $ExpectedCount) debits=$($dr -eq $ExpectedAmount) credits=$($cr -eq $ExpectedAmount) | cnt=[$cnt]/[$ExpectedCount] dr=[$dr]/[$ExpectedAmount] cr=[$cr] ok=[$ok]" -ForegroundColor DarkGray
         $detail = "lines=$cnt (expect $ExpectedCount), debits=$($dr.ToString('N2', $inv)), credits=$($cr.ToString('N2', $inv)) (expect $($ExpectedAmount.ToString('N2', $inv)))"
         Add-Result 'Test 1 totals' $(if ($ok) { 'PASS' } else { 'FAIL' }) $detail
 
