@@ -289,7 +289,7 @@ function agingReport(
   return {
     id,
     title,
-    validated: kind === 'AcctPay', // AP validated 2026-11-13 (see notes); AR pending: customer attribution of unnamed journal lines
+    validated: true, // both validated 2026-11-13 (see notes)
     params: [],
     columns: agingColumns,
     notes: [
@@ -298,7 +298,7 @@ function agingReport(
       `Ties to the ${label} control-account balance on every pull. Days past due use US Eastern time.`,
       ...(kind === 'AcctPay'
         ? ['Validated 2026-11-13 (sandbox) against NetSuite\'s A/P Aging Summary: total 3,646,064.99, all five buckets and "- No Vendor -" (535,036.79) match exactly.']
-        : []),
+        : ['Validated 2026-11-13 (sandbox) against NetSuite\'s A/R Aging Summary: total 21,250,408.01, all five buckets and every customer row (parents rolled up; "- No Customer -" 1,328,221.63) match exactly.']),
     ],
     sums: [{ column: 'openamount', alias: 'openamount' }],
     ties: [{ a: 'openamount', b: 'control', message: `The aging did not tie to the ${label} control account, so nothing was returned. Contact the report owner.` }],

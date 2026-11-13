@@ -55,7 +55,7 @@ test('catalog: every row query has ORDER BY; SQL is built only from validated va
     const { rows, totals } = getReport(r.id).build(validateParams(getReport(r.id), samples[r.id]));
     assert.match(rows, /ORDER BY/, `${r.id} rows need ORDER BY`);
     assert.doesNotMatch(totals + rows, /;|--/, `${r.id} has no statement separators`);
-    assert.equal(r.validated, ['trial_balance', 'gl_detail', 'journal_entries', 'ap_aging'].includes(r.id), `${r.id} validated flag`); // reconciled to NetSuite
+    assert.equal(r.validated, true, `${r.id} validated flag`); // all five reconciled to NetSuite on 2026-11-13 (sandbox)
   }
   assert.equal(listReports().length, 5);
   assert.ok(!JSON.stringify(listReports()).includes('SELECT'), 'client listing must not leak SQL');
