@@ -63,7 +63,7 @@ try {
         Write-Host ("[{0}] Control tie: aging total {1} = {2} control-account balance {3}" -f $(if ($ok2) { 'PASS' } else { 'FAIL' }), $open.ToString('N2', $inv), $Kind, $control.ToString('N2', $inv)) -ForegroundColor $(if ($ok2) { 'Green' } else { 'Red' })
         if (-not ($ok1 -and $ok2)) { $failed = $true }
 
-        # Buckets exactly as the API derives them (deriveAging in catalog.ts): days past due from the due date
+        # Buckets exactly as the API derives them (deriveAging in catalog.js): days past due from the due date
         # (transaction date if none) to today in US Eastern; 0 or less = Current.
         $tz = try { [TimeZoneInfo]::FindSystemTimeZoneById('America/New_York') } catch { [TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time') }
         $today = [TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $tz).Date

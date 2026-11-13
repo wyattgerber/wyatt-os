@@ -1,34 +1,18 @@
 // Runs one report with a hard reconciliation gate: data is returned ONLY if the pulled rows match
 // NetSuite's own COUNT/SUM exactly (and NetSuite's totals did not move during the pull).
 
-import { ApiError } from './errors';
-import { ReportDef } from './catalog';
-import { formatMoney, parseMoney } from './money';
-import { PullInfo, QueryProvider, ReportResult } from './types';
+import { ApiError } from './errors.js';
 
-export interface RunOptions {
-  maxRows: number;
-  pageSize?: number; // NetSuite SuiteQL max is 1,000
-  concurrency?: number;
-  user: string;
-  mock: boolean;
-  now?: Date;
-}
+import { formatMoney, parseMoney } from './money.js';
 
-interface Totals {
-  count: number;
-  sums: Map<string, bigint>;
-  row: Record<string, unknown>;
-}
-
-async function fetchTotals(def: ReportDef, params: Record<string, string>, provider: QueryProvider): Promise<Totals> {
+async function fetchTotals(def, params, provider) {
   const { totals } = def.build(params);
   const res = await provider.query({ report: def.id, kind: 'totals', params, sql: totals }, 0, 1);
   if (res.items.length !== 1) throw new ApiError(502, 'NS_TOTALS', 'NetSuite returned an unexpected totals result.', `items=${res.items.length}`);
   const row = res.items[0];
   const count = Number(row.cnt);
   if (!Number.isSafeInteger(count) || count < 0) throw new ApiError(502, 'NS_TOTALS', 'NetSuite returned an unexpected row count.');
-  const sums = new Map<string, bigint>();
+  const sums = new Map();
   for (const s of def.sums) sums.set(s.column, parseMoney(row[s.alias]));
   for (const t of def.ties ?? []) {
     if (parseMoney(row[t.a]) !== parseMoney(row[t.b])) {
@@ -39,8 +23,8 @@ async function fetchTotals(def: ReportDef, params: Record<string, string>, provi
 }
 
 /** Run tasks with at most `n` in flight; results keep input order; first failure rejects. */
-async function pool<T>(n: number, tasks: (() => Promise<T>)[]): Promise<T[]> {
-  const results: T[] = new Array(tasks.length);
+async function pool(n, tasks) {
+  const results = new Array(tasks.length);
   let next = 0;
   const worker = async () => {
     while (next < tasks.length) {
@@ -53,16 +37,16 @@ async function pool<T>(n: number, tasks: (() => Promise<T>)[]): Promise<T[]> {
 }
 
 /** Today's date (YYYY-MM-DD) in US Eastern. */
-export function todayEastern(now: Date = new Date()): string {
+export function todayEastern(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
 export async function runReport(
-  def: ReportDef,
-  params: Record<string, string>,
-  provider: QueryProvider,
-  opts: RunOptions,
-): Promise<ReportResult> {
+  def,
+  params,
+  provider,
+  opts,
+) {
   const pageSize = opts.pageSize ?? 1000;
   const concurrency = opts.concurrency ?? 3;
   const now = opts.now ?? new Date();
@@ -100,7 +84,7 @@ export async function runReport(
   }
   for (const s of def.sums) {
     const got = raw.reduce((acc, r) => acc + parseMoney(r[s.column]), 0n);
-    const want = before.sums.get(s.column) as bigint;
+    const want = before.sums.get(s.column);
     if (got !== want) {
       throw new ApiError(502, 'RECONCILIATION_FAILED', 'The totals did not match NetSuite, so nothing was returned.', `${s.column}: rows ${got} vs NetSuite ${want}`);
     }
@@ -114,8 +98,8 @@ export async function runReport(
 
   // 5. Shape rows to columns (money exact, derived columns added).
   const today = todayEastern(now);
-  const rows: string[][] = raw.map((r) => {
-    const base: Record<string, string> = {};
+  const rows = raw.map((r) => {
+    const base = {};
     for (const c of def.columns) {
       const v = r[c.key];
       if (c.type === 'money') base[c.key] = formatMoney(parseMoney(v)); // NetSuite omits null columns -> 0.00
@@ -127,7 +111,7 @@ export async function runReport(
 
   const debits = before.sums.get('debit');
   const credits = before.sums.get('credit');
-  const info: PullInfo = {
+  const info = {
     report: def.id,
     title: def.title,
     params,

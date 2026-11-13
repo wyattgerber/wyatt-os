@@ -2,26 +2,18 @@
 // Read-only by construction: the only calls made are the token POST and the SuiteQL POST (Prefer: transient).
 
 import { createPrivateKey, sign } from 'node:crypto';
-import { ApiError } from './errors';
-import { BuiltQuery, QueryProvider } from './types';
+import { ApiError } from './errors.js';
 
-export interface NsCreds {
-  accountId: string;
-  clientId: string;
-  certificateId: string;
-  privateKeyPem: string;
-}
-
-const b64url = (b: Buffer | string) => Buffer.from(b).toString('base64url');
+const b64url = (b) => Buffer.from(b).toString('base64url');
 
 /** "3816459_SB1" or "3816459-sb1" -> "3816459-sb1" */
-export function hostFor(accountId: string): string {
+export function hostFor(accountId) {
   const id = accountId.trim().toLowerCase().replace(/_/g, '-');
   if (!/^[a-z0-9-]+$/.test(id)) throw new Error('Bad NetSuite account id');
   return `https://${id}.suitetalk.api.netsuite.com`;
 }
 
-export function buildClientAssertion(c: NsCreds, nowSec: number = Math.floor(Date.now() / 1000)): string {
+export function buildClientAssertion(c, nowSec = Math.floor(Date.now() / 1000)) {
   const header = { alg: 'ES256', typ: 'JWT', kid: c.certificateId };
   const claims = {
     iss: c.clientId,
@@ -36,24 +28,36 @@ export function buildClientAssertion(c: NsCreds, nowSec: number = Math.floor(Dat
   return `${input}.${b64url(sig)}`;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export class NetSuiteClient implements QueryProvider {
-  private token?: { value: string; expiresAt: number };
-  constructor(
-    private creds: NsCreds,
-    private log: (msg: string) => void = () => {},
-    private fetchImpl: typeof fetch = fetch,
-  ) {}
+export class NetSuiteClient {
+  token; // { value, expiresAt } once signed in
+  constructor(creds, log = () => {}, fetchImpl = fetch) {
+    this.creds = creds;
+    this.log = log;
+    this.fetchImpl = fetchImpl;
+  }
 
-  private async getToken(force = false): Promise<string> {
+  /** fetch(), but a network failure becomes a friendly error whose detail (for logs) names the real cause. */
+  async send(url, init) {
+    try {
+      return await this.fetchImpl(url, init);
+    } catch (e) {
+      const c = e && e.cause;
+      const why = c ? `${c.code ?? ''} ${c.message ?? ''}`.trim() : String((e && e.message) || e);
+      this.log(`NetSuite unreachable: ${why}`);
+      throw new ApiError(502, 'NS_UNREACHABLE', 'Could not reach NetSuite. Please try again; if it keeps happening, contact the report owner.', why);
+    }
+  }
+
+          async getToken(force = false) {
     if (!force && this.token && this.token.expiresAt - Date.now() > 60_000) return this.token.value;
     const body = new URLSearchParams({
       grant_type: 'client_credentials',
       client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
       client_assertion: buildClientAssertion(this.creds),
     });
-    const res = await this.fetchImpl(`${hostFor(this.creds.accountId)}/services/rest/auth/oauth2/v1/token`, {
+    const res = await this.send(`${hostFor(this.creds.accountId)}/services/rest/auth/oauth2/v1/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
@@ -62,16 +66,16 @@ export class NetSuiteClient implements QueryProvider {
       const text = (await res.text().catch(() => '')).slice(0, 300);
       throw new ApiError(502, 'NS_AUTH', 'Could not sign in to NetSuite. Please try again later.', `token endpoint ${res.status}: ${text}`);
     }
-    const j = (await res.json()) as { access_token: string; expires_in?: number };
+    const j = (await res.json());
     this.token = { value: j.access_token, expiresAt: Date.now() + (j.expires_in ?? 3600) * 1000 };
     return j.access_token;
   }
 
-  async query(q: BuiltQuery, offset: number, limit: number) {
+  async query(q, offset, limit) {
     const url = `${hostFor(this.creds.accountId)}/services/rest/query/v1/suiteql?limit=${limit}&offset=${offset}`;
     let refreshed = false;
     for (let attempt = 0; attempt < 4; attempt++) {
-      const res = await this.fetchImpl(url, {
+      const res = await this.send(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${await this.getToken()}`,
@@ -81,7 +85,7 @@ export class NetSuiteClient implements QueryProvider {
         body: JSON.stringify({ q: q.sql }),
       });
       if (res.ok) {
-        const j = (await res.json()) as { items?: Record<string, unknown>[]; hasMore?: boolean };
+        const j = (await res.json());
         return { items: j.items ?? [], hasMore: Boolean(j.hasMore) };
       }
       if (res.status === 401 && !refreshed) {

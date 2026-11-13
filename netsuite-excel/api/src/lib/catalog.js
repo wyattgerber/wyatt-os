@@ -1,22 +1,25 @@
 // The ONLY place SuiteQL is written. Clients send a report id + parameters; SQL is built here
 // from validated values. Every row query has a deterministic ORDER BY (paging depends on it).
 //
-// STATUS: every report is validated:false. See README "Known problems" before trusting numbers.
-// Schema names marked (UNVERIFIED) have not been confirmed against the sandbox yet.
+// STATUS: all five reports are validated against the NetSuite sandbox (see each report's notes and the README).
 
-import { ApiError } from './errors';
-import { formatMoney, parseMoney } from './money';
-import { Column, ParamSpec, ReportMeta } from './types';
+import { ApiError } from './errors.js';
+import { formatMoney, parseMoney } from './money.js';
 
-export interface ReportDef extends ReportMeta {
-  build(params: Record<string, string>): { totals: string; rows: string };
-  /** Money columns whose row-sum must equal the matching alias in the totals query. */
-  sums: { column: string; alias: string }[];
-  /** Pairs of totals-query aliases that must be exactly equal (e.g. aging total = control account), else fail closed. */
-  ties?: { a: string; b: string; message: string }[];
-  /** Adds derived columns to a row (all values already strings). `today` is YYYY-MM-DD in US Eastern. */
-  derive?(row: Record<string, string>, today: string): Record<string, string>;
-}
+/**
+ * A report definition. The client only ever sees the ReportMeta part (id, title, validated, params, columns, notes).
+ * @typedef {object} ReportDef
+ * @property {string} id
+ * @property {string} title
+ * @property {boolean} validated   true once reconciled to NetSuite's own reports
+ * @property {{name: string, label: string, type: 'date'|'text', required: boolean, help?: string}[]} params
+ * @property {{key: string, label: string, type: 'text'|'date'|'money'|'int'}[]} columns
+ * @property {string[]} notes
+ * @property {(params: Record<string, string>) => {totals: string, rows: string}} build  builds the two SuiteQL queries
+ * @property {{column: string, alias: string}[]} sums  money columns whose row-sum must equal the totals-query alias
+ * @property {{a: string, b: string, message: string}[]} [ties]  totals aliases that must be exactly equal, else fail closed
+ * @property {(row: Record<string, string>, today: string) => Record<string, string>} [derive]  adds derived columns; today = YYYY-MM-DD US Eastern
+ */
 
 // ---------- parameter validation ----------
 
@@ -26,23 +29,23 @@ const PERIOD_RE = /^[A-Za-z0-9 .-]{1,30}$/;
 const PERIOD_PARAMS = new Set(['period', 'fromPeriod', 'toPeriod']);
 const MAX_PARAM_LEN = 64;
 
-export function isIsoDate(s: string): boolean {
+export function isIsoDate(s) {
   if (!DATE_RE.test(s)) return false;
   const d = new Date(`${s}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
-export function validateParams(def: ReportDef, raw: unknown): Record<string, string> {
+export function validateParams(def, raw) {
   if (raw === undefined || raw === null) raw = {};
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     throw new ApiError(400, 'BAD_PARAMS', 'The report parameters were not in the expected format.');
   }
-  const input = raw as Record<string, unknown>;
+  const input = raw;
   const known = new Map(def.params.map((p) => [p.name, p]));
   for (const k of Object.keys(input)) {
     if (!known.has(k)) throw new ApiError(400, 'UNKNOWN_PARAM', `Unknown parameter "${k.slice(0, 40)}" for this report.`);
   }
-  const out: Record<string, string> = {};
+  const out = {};
   for (const spec of def.params) {
     const v = input[spec.name];
     if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
@@ -72,12 +75,12 @@ export function validateParams(def: ReportDef, raw: unknown): Record<string, str
 const TAL_FROM = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction';
 const TAL_BASE = `tal.posting = 'T' AND tal.accountingbook = 1`;
 
-const periodRangeParams: ParamSpec[] = [
-  { name: 'fromPeriod', label: 'From period (e.g. Oct 2026)', type: 'text', required: true },
-  { name: 'toPeriod', label: 'To period (e.g. Oct 2026)', type: 'text', required: true },
+const periodRangeParams = [
+  { name: 'fromPeriod', label: 'From period', type: 'text', required: true },
+  { name: 'toPeriod', label: 'To period', type: 'text', required: true },
 ];
 
-const lineColumns: Column[] = [
+const lineColumns = [
   { key: 'postingperiod', label: 'Period', type: 'text' },
   { key: 'trandate', label: 'Date', type: 'date' },
   { key: 'trantype', label: 'Type', type: 'text' },
@@ -93,7 +96,7 @@ const lineColumns: Column[] = [
 
 // Line-level reports filter on POSTING PERIOD (same basis as the validated Trial Balance), From..To inclusive.
 // One-row range view: MAX(CASE..) keeps it exactly one row; an unknown period name gives NULL -> no rows (visible).
-function periodRange(from: string, to: string): string {
+function periodRange(from, to) {
   return (
     `(SELECT MAX(CASE WHEN tp.periodname = '${from}' THEN tp.startdate END) AS rstart, ` +
     `MAX(CASE WHEN tp.periodname = '${to}' THEN tp.enddate END) AS rend FROM accountingperiod tp ` +
@@ -101,7 +104,7 @@ function periodRange(from: string, to: string): string {
   );
 }
 
-function lineQueries(p: Record<string, string>, extraWhere: string) {
+function lineQueries(p, extraWhere) {
   const from =
     `${TAL_FROM} INNER JOIN accountingperiod pp ON pp.id = t.postingperiod ` +
     `INNER JOIN ${periodRange(p.fromPeriod, p.toPeriod)} rg ON 1 = 1`;
@@ -134,7 +137,7 @@ const lineSums = [
 //    matching NetSuite's Trial Balance report. Rows' sums still equal the totals query exactly.
 const PL_TYPES = `'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'`;
 
-function tbParts(period: string) {
+function tbParts(period) {
   // One-row inline view with the period's start/end and its fiscal-year start. MAX() makes it exactly one row
   // (NULLs if the name matches nothing -> empty TB, visible). No subqueries in GROUP BY/ORDER BY (Oracle rejects them).
   const per =
@@ -162,11 +165,11 @@ function tbParts(period: string) {
   return { from, where, key, num, name, type };
 }
 
-const trialBalance: ReportDef = {
+const trialBalance = {
   id: 'trial_balance',
   title: 'Trial Balance',
   validated: true,
-  params: [{ name: 'period', label: 'Accounting period (e.g. Oct 2026)', type: 'text', required: true }],
+  params: [{ name: 'period', label: 'Period', type: 'text', required: true }],
   columns: [
     { key: 'acctnumber', label: 'Account #', type: 'text' },
     { key: 'acctname', label: 'Account', type: 'text' },
@@ -198,7 +201,7 @@ const trialBalance: ReportDef = {
   },
 };
 
-const journalEntries: ReportDef = {
+const journalEntries = {
   id: 'journal_entries',
   title: 'Journal Entries',
   validated: true,
@@ -214,7 +217,7 @@ const journalEntries: ReportDef = {
   },
 };
 
-const glDetail: ReportDef = {
+const glDetail = {
   id: 'gl_detail',
   title: 'GL Detail',
   validated: true,
@@ -234,7 +237,7 @@ const glDetail: ReportDef = {
 };
 
 // Aging buckets are computed from US Eastern "today" by due date (transaction date when there is none), like NetSuite.
-const agingColumns: Column[] = [
+const agingColumns = [
   { key: 'entityname', label: 'Name', type: 'text' },
   { key: 'trantype', label: 'Type', type: 'text' },
   { key: 'tranid', label: 'Transaction #', type: 'text' },
@@ -249,16 +252,16 @@ const agingColumns: Column[] = [
   { key: 'd90plus', label: '90+', type: 'money' },
 ];
 
-function daysBetween(fromIso: string, toIso: string): number {
+function daysBetween(fromIso, toIso) {
   return Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / 86_400_000);
 }
 
-function deriveAging(row: Record<string, string>, today: string): Record<string, string> {
+function deriveAging(row, today) {
   const due = row.duedate || row.trandate;
   const days = Math.max(0, daysBetween(due, today));
   const amt = formatMoney(parseMoney(row.openamount));
   const zero = '0.00';
-  const out: Record<string, string> = { dayspastdue: String(days), current: zero, d1_30: zero, d31_60: zero, d61_90: zero, d90plus: zero };
+  const out = { dayspastdue: String(days), current: zero, d1_30: zero, d31_60: zero, d61_90: zero, d90plus: zero };
   const bucket = days === 0 ? 'current' : days <= 30 ? 'd1_30' : days <= 60 ? 'd31_60' : days <= 90 ? 'd61_90' : 'd90plus';
   out[bucket] = amt;
   return out;
@@ -273,8 +276,8 @@ function deriveAging(row: Record<string, string>, today: string): Record<string,
 // Every pull also requires: aging total == control-account balance. If NetSuite ever applies journals against
 // invoices/bills, that tie breaks and the pull fails instead of double counting.
 function agingReport(
-  id: string, title: string, kind: 'AcctRec' | 'AcctPay', docType: string, creditTypes: string[], noName: string, what: string,
-): ReportDef {
+  id, title, kind, docType, creditTypes, noName, what,
+) {
   const lineAmt = kind === 'AcctRec' ? '(NVL(tal.debit, 0) - NVL(tal.credit, 0))' : '(NVL(tal.credit, 0) - NVL(tal.debit, 0))';
   const credits = creditTypes.map((t) => `'${t}'`).join(', ');
   const open =
@@ -321,16 +324,25 @@ function agingReport(
 const arAging = agingReport('ar_aging', 'AR Aging', 'AcctRec', 'CustInvc', ['CustCred', 'CustPymt'], '- No Customer -', 'receivables');
 const apAging = agingReport('ap_aging', 'AP Aging', 'AcctPay', 'VendBill', ['VendCred', 'VendPymt'], '- No Vendor -', 'payables');
 
-const REPORTS: ReportDef[] = [trialBalance, journalEntries, glDetail, arAging, apAging];
+const REPORTS = [trialBalance, journalEntries, glDetail, arAging, apAging];
 const BY_ID = new Map(REPORTS.map((r) => [r.id, r]));
 
-export function getReport(id: unknown): ReportDef {
+/** Monthly posting periods (columns verified on the sandbox). Feeds the add-in's period dropdowns and server-side checks. */
+export const PERIODS_SQL =
+  "SELECT tp.periodname AS name, TO_CHAR(tp.startdate, 'YYYY-MM-DD') AS startdate, TO_CHAR(tp.enddate, 'YYYY-MM-DD') AS enddate " +
+  "FROM accountingperiod tp WHERE tp.isquarter = 'F' AND tp.isyear = 'F' ORDER BY tp.startdate, tp.id";
+
+export function isPeriodParam(name) {
+  return PERIOD_PARAMS.has(name);
+}
+
+export function getReport(id) {
   const def = typeof id === 'string' ? BY_ID.get(id) : undefined;
   if (!def) throw new ApiError(404, 'UNKNOWN_REPORT', 'That report does not exist.');
   return def;
 }
 
 /** Client-safe listing: no SQL, no functions. */
-export function listReports(): ReportMeta[] {
+export function listReports() {
   return REPORTS.map(({ id, title, validated, params, columns, notes }) => ({ id, title, validated, params, columns, notes }));
 }
