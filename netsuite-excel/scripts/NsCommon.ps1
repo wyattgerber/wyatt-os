@@ -9,7 +9,10 @@ $script:inv = [System.Globalization.CultureInfo]::InvariantCulture
 function ConvertTo-Base64Url([byte[]]$Bytes) { [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_') }
 
 # NetSuite omits null columns from SuiteQL rows, so read properties defensively.
-function Get-Prop($o, [string]$n) { $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value } else { return $null } }
+function Get-Prop($o, [string]$n) { if ($null -eq $o) { return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value } else { return $null } }
+
+# An empty JSON array comes back from a function as `$null, and @(`$null) has Count 1. Use this to get a real list.
+function Get-Items($body) { return , @(@(Get-Prop $body 'items') | Where-Object { $null -ne $_ }) }
 
 # Exact decimal parse; NetSuite may send scientific notation (e.g. 4.221607343E7).
 function ConvertTo-Dec($v) {

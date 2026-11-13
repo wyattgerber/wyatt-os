@@ -27,8 +27,9 @@ $inv = [System.Globalization.CultureInfo]::InvariantCulture
 if (-not $Probe) { throw 'Only -Probe is implemented so far. Run: ./Test-Aging.ps1 -Probe' }
 
 function Show-Table($items, [string[]]$Cols) {
-    if (@($items).Count -eq 0) { Write-Host '  (no rows)'; return }
-    @($items) | ForEach-Object { $o = $_; $h = [ordered]@{}; foreach ($c in $Cols) { $h[$c] = Get-Prop $o $c }; [pscustomobject]$h } |
+    $items = @($items | Where-Object { $null -ne $_ })
+    if ($items.Count -eq 0) { Write-Host '  (no rows: no transactions with a non-zero value)'; return }
+    $items | ForEach-Object { $o = $_; $h = [ordered]@{}; foreach ($c in $Cols) { $h[$c] = Get-Prop $o $c }; [pscustomobject]$h } |
         Format-Table -AutoSize | Out-String | Write-Host
 }
 
@@ -41,7 +42,7 @@ try {
     foreach ($f in 'amountunpaid', 'foreignamountunpaid', 'amountremaining', 'foreignamountremaining', 'paymentamountunused', 'foreignpaymentamountunused') {
         $r = Invoke-SuiteQL $conn ("SELECT t.type AS trantype, COUNT(*) AS n, ROUND(SUM(t.$f), 2) AS total FROM transaction t " +
             "WHERE t.posting = 'T' AND t.type IN ($types) AND NVL(t.$f, 0) <> 0 GROUP BY t.type ORDER BY t.type")
-        if ($r.Status -eq 200) { Write-Host "[OK]   $f" -ForegroundColor Green; Show-Table (Get-Prop $r.Body 'items') @('trantype', 'n', 'total') }
+        if ($r.Status -eq 200) { Write-Host "[OK]   $f" -ForegroundColor Green; Show-Table (Get-Items $r.Body) @('trantype', 'n', 'total') }
         else { Write-Host "[FAIL] $f -> HTTP $($r.Status): $(Format-NsError $r)`n" -ForegroundColor Red }
     }
 
@@ -51,7 +52,7 @@ try {
             "FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction INNER JOIN account a ON a.id = tal.account " +
             "WHERE tal.posting = 'T' AND tal.accountingbook = 1 AND a.accttype = '$kind' GROUP BY t.type ORDER BY t.type")
         if ($r.Status -ne 200) { Write-Host "[FAIL] HTTP $($r.Status): $(Format-NsError $r)" -ForegroundColor Red; continue }
-        $items = @(Get-Prop $r.Body 'items')
+        $items = Get-Items $r.Body
         Show-Table $items @('trantype', 'lines', 'debits', 'credits')
         $d = [decimal]0; $c = [decimal]0
         foreach ($x in $items) { $d += ConvertTo-Dec (Get-Prop $x 'debits'); $c += ConvertTo-Dec (Get-Prop $x 'credits') }
