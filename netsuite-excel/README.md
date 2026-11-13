@@ -25,6 +25,7 @@ Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
 | `addin/src/taskpane/` | `taskpane.ts` UI, `api.ts` fetch, `auth.ts` dialog sign-in, `excelWriter.ts` sheet writer, `signin-complete.html` |
 | `scripts/New-NetSuiteCert.ps1` | Creates EC P-256 key + 730-day cert; private key goes straight to 1Password |
 | `scripts/Test-NetSuite.ps1` | Totals check, `accountingperiod` visibility, write-rejection tests |
+| `scripts/Invoke-LocalReport.ps1` | Runs one report through the real API code against the sandbox from your PC (secrets from 1Password, no Azure); `api/src/cli.ts` is its entry point |
 | `docs/IT-request.md` | Draft IT request (not sent) |
 
 ## Design rules
@@ -55,6 +56,15 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 2. NetSuite: enable REST Web Services + OAuth 2.0; create the integration record (Client Credentials/M2M only, REST Web Services scope); save Client ID to `client_id`.
 3. OAuth 2.0 Client Credentials (M2M) Setup: entity = the `API_User` holder, role `API_User`, upload the public `.pem`; save Certificate ID to `certificate_id`.
 4. `./scripts/Test-NetSuite.ps1`. Reconciliation target: Oct 2026 posting lines = **2,230**, debits = credits = **42,216,073.43**.
+
+## Sandbox test results (2026-11-13)
+
+- Auth (OAuth 2.0 M2M, ES256 JWT): PASS.
+- Test 1: PASS. Oct 2026 = 2,230 posting lines, debits = credits = 42,216,073.43. Types visible: CustInvc 142, CustPymt 26, Deposit 11, Journal 545, VendBill 1506. (Deposit View had to be added to `API_User`.)
+- Tests 3a/3b: PASS. Customer and account writes are rejected (HTTP 403): the role is read-only.
+- Test 2: **FAIL.** SuiteQL says `Record 'accountingperiod' was not found`, even after adding Period Closing Management / Accounting Management. Those were Full-only and were removed (least privilege). Trial balance by posting period is still blocked.
+- NetSuite returns SUMs as doubles, sometimes in scientific notation (`4.221607343E7`). The API parses exponents exactly and rounds SUMs to cents in SQL (`ROUND(SUM(..), 2)`, unverified against real SuiteQL until the first API run).
+- `op whoami` makes the next `op` call fail on this setup; scripts avoid it.
 
 ## Known problems (not done)
 

@@ -9,3 +9,6 @@ local.settings.json
 *.key
 *.pfx
 *.bundle
+
+# Report output is financial data: never commit
+out/
