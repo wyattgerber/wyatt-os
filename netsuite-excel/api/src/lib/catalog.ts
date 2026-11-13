@@ -89,7 +89,7 @@ const lineColumns: Column[] = [
 
 function lineQueries(where: string) {
   return {
-    totals: `SELECT COUNT(*) AS cnt, SUM(tal.debit) AS debits, SUM(tal.credit) AS credits ${TAL_FROM} WHERE ${where}`,
+    totals: `SELECT COUNT(*) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ${TAL_FROM} WHERE ${where}`,
     rows:
       `SELECT TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, t.type AS trantype, t.tranid AS tranid, ` +
       `a.acctnumber AS acctnumber, BUILTIN.DF(tal.account) AS acctname, BUILTIN.DF(t.entity) AS entityname, ` +
@@ -129,10 +129,10 @@ const trialBalance: ReportDef = {
   build(p) {
     const where = `${TAL_BASE} AND t.trandate <= ${toDate(p.asOfDate)}`;
     return {
-      totals: `SELECT COUNT(DISTINCT tal.account) AS cnt, SUM(tal.debit) AS debits, SUM(tal.credit) AS credits ${TAL_FROM} WHERE ${where}`,
+      totals: `SELECT COUNT(DISTINCT tal.account) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ${TAL_FROM} WHERE ${where}`,
       rows:
         `SELECT a.acctnumber AS acctnumber, BUILTIN.DF(tal.account) AS acctname, a.accttype AS accttype, ` +
-        `SUM(tal.debit) AS debit, SUM(tal.credit) AS credit ${TAL_FROM} ` +
+        `ROUND(SUM(tal.debit), 2) AS debit, ROUND(SUM(tal.credit), 2) AS credit ${TAL_FROM} ` +
         `INNER JOIN account a ON a.id = tal.account WHERE ${where} ` +
         `GROUP BY tal.account, a.acctnumber, a.accttype, BUILTIN.DF(tal.account) ORDER BY a.acctnumber, tal.account`,
     };
@@ -229,7 +229,7 @@ function agingReport(id: string, title: string, invType: string, otherTypes: str
     sums: [{ column: 'openamount', alias: 'openamount' }],
     build() {
       return {
-        totals: `SELECT COUNT(*) AS cnt, SUM(${amount}) AS openamount FROM transaction t WHERE ${where}`,
+        totals: `SELECT COUNT(*) AS cnt, ROUND(SUM(${amount}), 2) AS openamount FROM transaction t WHERE ${where}`,
         rows:
           `SELECT BUILTIN.DF(t.entity) AS entityname, t.type AS trantype, t.tranid AS tranid, ` +
           `TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, TO_CHAR(t.duedate, 'YYYY-MM-DD') AS duedate, ` +
