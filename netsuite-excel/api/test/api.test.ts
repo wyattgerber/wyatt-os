@@ -188,3 +188,22 @@ test('trial balance: by posting period, FYTD P&L, one calculated retained-earnin
   const body = r.body as { info: { balanced: boolean } };
   assert.equal(body.info.balanced, true); // every transaction balances, so a cumulative TB must too
 });
+
+test('NetSuite omits null columns: missing debit/credit read as 0.00 and still reconcile', async () => {
+  class OmitsZeros implements QueryProvider {
+    inner = new MockProvider();
+    async query(q: BuiltQuery, offset: number, limit: number) {
+      const res = await this.inner.query(q, offset, limit);
+      if (q.kind === 'rows') {
+        for (const it of res.items) for (const k of ['debit', 'credit']) if (it[k] === '0.00') delete it[k]; // like NetSuite's null omission
+      }
+      return res;
+    }
+  }
+  const res = await runReport(getReport('gl_detail'), OCT, new OmitsZeros(), { maxRows: 20000, user: 'ann@example.com', mock: true });
+  const di = res.columns.findIndex((c) => c.key === 'debit');
+  const ci = res.columns.findIndex((c) => c.key === 'credit');
+  assert.ok(res.rows.every((r) => r[di] !== '' && r[ci] !== ''), 'no blank money cells');
+  assert.ok(res.rows.some((r) => r[di] === '0.00') && res.rows.some((r) => r[ci] === '0.00'));
+  assert.equal(res.info.reconciliation, 'PASS');
+});

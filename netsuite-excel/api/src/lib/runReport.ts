@@ -112,7 +112,7 @@ export async function runReport(
     const base: Record<string, string> = {};
     for (const c of def.columns) {
       const v = r[c.key];
-      if (c.type === 'money') base[c.key] = v === undefined ? '' : formatMoney(parseMoney(v));
+      if (c.type === 'money') base[c.key] = formatMoney(parseMoney(v)); // NetSuite omits null columns -> 0.00
       else base[c.key] = v === null || v === undefined ? '' : String(v);
     }
     const full = def.derive ? { ...base, ...def.derive(base, today) } : base;

@@ -33,6 +33,8 @@ function Get-OpField([string]$Field) {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($v)) { throw "Could not read 1Password field '$Field' (is the app unlocked?)." }
     return ($v -join "`n").Trim()
 }
+# NetSuite omits null columns from SuiteQL rows (e.g. SUM of no debits), so read properties defensively.
+function Get-Prop($o, [string]$n) { $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value } else { return $null } }
 function ConvertTo-Dec($v) {
     if ($null -eq $v -or "$v" -eq '') { return [decimal]0 }
     return [decimal]::Parse([string]::Format($inv, '{0}', $v), [System.Globalization.NumberStyles]::Float, $inv)
@@ -100,7 +102,7 @@ try {
         $p.Body.items | ForEach-Object { $all.Add($_) }
     }
     $rd = [decimal]0; $rc = [decimal]0
-    foreach ($row in $all) { $rd += ConvertTo-Dec $row.debit; $rc += ConvertTo-Dec $row.credit }
+    foreach ($row in $all) { $rd += ConvertTo-Dec (Get-Prop $row 'debit'); $rc += ConvertTo-Dec (Get-Prop $row 'credit') }
     $gate = ($all.Count -eq $tc) -and ($rd -eq $td) -and ($rc -eq $tcr)
     Write-Host ("Rows={0} (NetSuite totals count={1}); row debits={2:N2} vs {3:N2}; row credits={4:N2} vs {5:N2}" -f $all.Count, $tc, $rd, $td, $rc, $tcr)
     Write-Host $(if ($gate) { '[PASS] Reconciliation gate: rows match NetSuite totals exactly.' } else { '[FAIL] Reconciliation gate: rows do NOT match NetSuite totals.' }) -ForegroundColor $(if ($gate) { 'Green' } else { 'Red' })
@@ -110,17 +112,17 @@ try {
     Write-Host $(if ($bal) { "[PASS] Balanced: debits = credits = $($td.ToString('N2', $inv))" } else { "[FAIL] NOT balanced: debits $($td.ToString('N2', $inv)) vs credits $($tcr.ToString('N2', $inv))" }) -ForegroundColor $(if ($bal) { 'Green' } else { 'Red' })
 
     Write-Host "`nTotals by account type (compare with NetSuite's Trial Balance report):"
-    $all | Group-Object accttype | ForEach-Object {
-        $d = [decimal]0; $c2 = [decimal]0; foreach ($x in $_.Group) { $d += ConvertTo-Dec $x.debit; $c2 += ConvertTo-Dec $x.credit }
+    $all | Group-Object { Get-Prop $_ 'accttype' } | ForEach-Object {
+        $d = [decimal]0; $c2 = [decimal]0; foreach ($x in $_.Group) { $d += ConvertTo-Dec (Get-Prop $x 'debit'); $c2 += ConvertTo-Dec (Get-Prop $x 'credit') }
         [pscustomobject]@{ Type = $_.Name; Accounts = $_.Count; Debit = $d.ToString('N2', $inv); Credit = $c2.ToString('N2', $inv) }
     } | Sort-Object Type | Format-Table -AutoSize | Out-String | Write-Host
-    $re = @($all | Where-Object { $_.acctnumber -eq 'RE-CALC' })
-    Write-Host $(if ($re.Count -eq 1) { "Retained Earnings (calculated) row: debit=$($re[0].debit) credit=$($re[0].credit)" } else { "No calculated Retained Earnings row (count=$($re.Count)): there is no prior-year P&L, or the fiscal-year logic did not apply." })
+    $re = @($all | Where-Object { (Get-Prop $_ 'acctnumber') -eq 'RE-CALC' })
+    Write-Host $(if ($re.Count -eq 1) { "Retained Earnings (calculated) row: debit=$(Get-Prop $re[0] 'debit') credit=$(Get-Prop $re[0] 'credit')" } else { "No calculated Retained Earnings row (count=$($re.Count)): there is no prior-year P&L, or the fiscal-year logic did not apply." })
 
     $outDir = Join-Path $PSScriptRoot '..\api\out'
     New-Item -ItemType Directory -Force $outDir | Out-Null
     $csv = Join-Path $outDir ("tb-" + ($Period -replace '[^A-Za-z0-9]', '_') + '.csv')
-    $all | Select-Object acctnumber, acctname, accttype, debit, credit | Export-Csv -LiteralPath $csv -NoTypeInformation
+    $all | ForEach-Object { [pscustomobject]@{ acctnumber = Get-Prop $_ 'acctnumber'; acctname = Get-Prop $_ 'acctname'; accttype = Get-Prop $_ 'accttype'; debit = Get-Prop $_ 'debit'; credit = Get-Prop $_ 'credit' } } | Export-Csv -LiteralPath $csv -NoTypeInformation
     Write-Host "`nFull TB written to $csv (gitignored financial data; do not share or commit)."
     if (-not ($gate -and $bal)) { exit 1 }
 }
