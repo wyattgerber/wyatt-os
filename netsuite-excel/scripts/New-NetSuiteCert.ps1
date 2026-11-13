@@ -50,7 +50,7 @@ if (Test-Path -LiteralPath $certPath) { throw "'$certPath' already exists. Move 
 $ecdsa = $null
 $template = $null
 try {
-    $ecdsa = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve]::NamedCurves.nistP256)
+    $ecdsa = [System.Security.Cryptography.ECDsa]::Create([System.Security.Cryptography.ECCurve]::CreateFromOid([System.Security.Cryptography.Oid]::new('1.2.840.10045.3.1.7')))
     $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
         'CN=NetSuite Excel Integration (sandbox)', $ecdsa, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
     $notBefore = [DateTimeOffset]::UtcNow.AddMinutes(-5)
