@@ -116,13 +116,24 @@ try {
         $d = [decimal]0; $c2 = [decimal]0; foreach ($x in $_.Group) { $d += ConvertTo-Dec (Get-Prop $x 'debit'); $c2 += ConvertTo-Dec (Get-Prop $x 'credit') }
         [pscustomobject]@{ Type = $_.Name; Accounts = $_.Count; Debit = $d.ToString('N2', $inv); Credit = $c2.ToString('N2', $inv) }
     } | Sort-Object Type | Format-Table -AutoSize | Out-String | Write-Host
+    # NetSuite's Trial Balance report shows NET balances: debit column = accounts with a net debit, credit column = net credit.
+    $netDr = [decimal]0; $netCr = [decimal]0
+    foreach ($x in $all) {
+        $net = (ConvertTo-Dec (Get-Prop $x 'debit')) - (ConvertTo-Dec (Get-Prop $x 'credit'))
+        if ($net -gt 0) { $netDr += $net } else { $netCr += (-$net) }
+    }
+    Write-Host ("NET totals (compare with the footer of NetSuite's Trial Balance report): Debit {0:N2} | Credit {1:N2}" -f $netDr, $netCr)
     $re = @($all | Where-Object { (Get-Prop $_ 'acctnumber') -eq 'RE-CALC' })
-    Write-Host $(if ($re.Count -eq 1) { "Retained Earnings (calculated) row: debit=$(Get-Prop $re[0] 'debit') credit=$(Get-Prop $re[0] 'credit')" } else { "No calculated Retained Earnings row (count=$($re.Count)): there is no prior-year P&L, or the fiscal-year logic did not apply." })
+    Write-Host $(if ($re.Count -eq 1) { "Retained Earnings (calculated) row: debit=$((ConvertTo-Dec (Get-Prop $re[0] 'debit')).ToString('N2', $inv)) credit=$((ConvertTo-Dec (Get-Prop $re[0] 'credit')).ToString('N2', $inv))" } else { "No calculated Retained Earnings row (count=$($re.Count)): there is no prior-year P&L, or the fiscal-year logic did not apply." })
 
     $outDir = Join-Path $PSScriptRoot '..\api\out'
     New-Item -ItemType Directory -Force $outDir | Out-Null
     $csv = Join-Path $outDir ("tb-" + ($Period -replace '[^A-Za-z0-9]', '_') + '.csv')
-    $all | ForEach-Object { [pscustomobject]@{ acctnumber = Get-Prop $_ 'acctnumber'; acctname = Get-Prop $_ 'acctname'; accttype = Get-Prop $_ 'accttype'; debit = Get-Prop $_ 'debit'; credit = Get-Prop $_ 'credit' } } | Export-Csv -LiteralPath $csv -NoTypeInformation
+    $all | ForEach-Object {
+        $d = ConvertTo-Dec (Get-Prop $_ 'debit'); $c3 = ConvertTo-Dec (Get-Prop $_ 'credit')
+        [pscustomobject]@{ acctnumber = Get-Prop $_ 'acctnumber'; acctname = Get-Prop $_ 'acctname'; accttype = Get-Prop $_ 'accttype'
+            debit = $d.ToString('F2', $inv); credit = $c3.ToString('F2', $inv); net_dr_minus_cr = ($d - $c3).ToString('F2', $inv) }
+    } | Export-Csv -LiteralPath $csv
     Write-Host "`nFull TB written to $csv (gitignored financial data; do not share or commit)."
     if (-not ($gate -and $bal)) { exit 1 }
 }
