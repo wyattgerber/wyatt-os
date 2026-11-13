@@ -117,13 +117,6 @@ try {
         Write-Host "Raw from NetSuite: cnt=$($row.cnt) debits=$($row.debits) credits=$($row.credits)"
         if (($d -ne $dr) -or ($c -ne $cr)) { Write-Host 'NOTE: raw sums have more than 2 decimals (floating-point noise). The API rounds totals to cents to compare.' -ForegroundColor Yellow }
         $detail = "lines=$cnt (expect $ExpectedCount), debits=$($dr.ToString('N2', $inv)), credits=$($cr.ToString('N2', $inv)) (expect $($ExpectedAmount.ToString('N2', $inv)))"
-        Add-Result 'Test 1 totals' 'FAIL' "HTTP $($t1.Status): $(Format-NsError $t1)"
-    }
-    else {
-        $row = $t1.Body.items[0]
-        $cnt = [int](ConvertTo-Dec $row.cnt); $d = ConvertTo-Dec $row.debits; $c = ConvertTo-Dec $row.credits
-        $ok = ($cnt -eq $ExpectedCount) -and ($d -eq $ExpectedAmount) -and ($c -eq $ExpectedAmount)
-        $detail = "lines=$cnt (expect $ExpectedCount), debits=$($d.ToString('N2', $inv)), credits=$($c.ToString('N2', $inv)) (expect $($ExpectedAmount.ToString('N2', $inv)))"
         Add-Result 'Test 1 totals' $(if ($ok) { 'PASS' } else { 'FAIL' }) $detail
 
         $br = Invoke-SuiteQL "SELECT t.type AS trantype, COUNT(*) AS cnt, SUM(tal.debit) AS debits, SUM(tal.credit) AS credits $from GROUP BY t.type ORDER BY t.type"
