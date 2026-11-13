@@ -73,8 +73,8 @@ const TAL_FROM = 'FROM transactionaccountingline tal INNER JOIN transaction t ON
 const TAL_BASE = `tal.posting = 'T' AND tal.accountingbook = 1`;
 
 const periodRangeParams: ParamSpec[] = [
-  { name: 'fromPeriod', label: 'From period (e.g. Oct 2026)', type: 'text', required: true },
-  { name: 'toPeriod', label: 'To period (e.g. Oct 2026)', type: 'text', required: true },
+  { name: 'fromPeriod', label: 'From period', type: 'text', required: true },
+  { name: 'toPeriod', label: 'To period', type: 'text', required: true },
 ];
 
 const lineColumns: Column[] = [
@@ -166,7 +166,7 @@ const trialBalance: ReportDef = {
   id: 'trial_balance',
   title: 'Trial Balance',
   validated: true,
-  params: [{ name: 'period', label: 'Accounting period (e.g. Oct 2026)', type: 'text', required: true }],
+  params: [{ name: 'period', label: 'Period', type: 'text', required: true }],
   columns: [
     { key: 'acctnumber', label: 'Account #', type: 'text' },
     { key: 'acctname', label: 'Account', type: 'text' },
@@ -323,6 +323,15 @@ const apAging = agingReport('ap_aging', 'AP Aging', 'AcctPay', 'VendBill', ['Ven
 
 const REPORTS: ReportDef[] = [trialBalance, journalEntries, glDetail, arAging, apAging];
 const BY_ID = new Map(REPORTS.map((r) => [r.id, r]));
+
+/** Monthly posting periods (columns verified on the sandbox). Feeds the add-in's period dropdowns and server-side checks. */
+export const PERIODS_SQL =
+  "SELECT tp.periodname AS name, TO_CHAR(tp.startdate, 'YYYY-MM-DD') AS startdate, TO_CHAR(tp.enddate, 'YYYY-MM-DD') AS enddate " +
+  "FROM accountingperiod tp WHERE tp.isquarter = 'F' AND tp.isyear = 'F' ORDER BY tp.startdate, tp.id";
+
+export function isPeriodParam(name: string): boolean {
+  return PERIOD_PARAMS.has(name);
+}
 
 export function getReport(id: unknown): ReportDef {
   const def = typeof id === 'string' ? BY_ID.get(id) : undefined;

@@ -22,5 +22,6 @@ export interface PullInfo {
 }
 export interface ReportResult { columns: Column[]; rows: string[][]; info: PullInfo }
 
+export interface Period { name: string; start: string; end: string }
 export interface Me { email: string; allowed: boolean; role: string; mock: boolean }
 export interface ReportsResponse { mock: boolean; maxRows: number; reports: ReportMeta[] }

@@ -6,7 +6,8 @@
   "scripts": {
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
-    "validate": "office-addin-manifest validate manifest.xml"
+    "validate": "office-addin-manifest validate manifest.xml",
+    "preview": "node preview/run.js"
   },
   "devDependencies": {
     "@types/office-js": "^1.0.400",

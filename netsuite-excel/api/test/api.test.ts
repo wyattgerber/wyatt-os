@@ -8,7 +8,7 @@ import { formatMoney, parseMoney } from '../src/lib/money';
 import { principalFromHeader } from '../src/lib/auth';
 import { MockProvider } from '../src/lib/mock';
 import { runReport } from '../src/lib/runReport';
-import { meService, reportsService, runService } from '../src/lib/service';
+import { meService, periodsService, reportsService, runService } from '../src/lib/service';
 import { buildClientAssertion } from '../src/lib/netsuite';
 import { BuiltQuery, QueryProvider } from '../src/lib/types';
 
@@ -300,4 +300,20 @@ test('aging: verified fields only, journals at full amount, named "no customer/v
     runReport(getReport('ar_aging'), {}, new Untied(), { maxRows: 100, user: 'x', mock: true }),
     (e: { code?: string; message?: string }) => e.code === 'RECONCILIATION_FAILED' && /control account/.test(e.message ?? ''),
   );
+});
+
+test('periods: /api/periods lists real periods; runs reject unknown names and reversed ranges', async () => {
+  const r = await periodsService(principal('ann@example.com'), { env: ENV });
+  assert.equal(r.status, 200);
+  const names = (r.body as { periods: { name: string }[] }).periods.map((p) => p.name);
+  assert.ok(names.includes('Oct 2026') && names.includes('Jan 2026'));
+  assert.equal((await periodsService(principal('eve@example.com'), { env: ENV })).status, 403);
+  const run = (params: Record<string, string>) =>
+    runService(principal('ann@example.com'), JSON.stringify({ report: 'gl_detail', params }), { env: ENV });
+  const typo = await run({ fromPeriod: 'Okt 2026', toPeriod: 'Oct 2026' });
+  assert.equal(typo.status, 400);
+  assert.equal((typo.body as { error: { code: string } }).error.code, 'UNKNOWN_PERIOD');
+  const reversed = await run({ fromPeriod: 'Oct 2026', toPeriod: 'Sep 2026' });
+  assert.equal((reversed.body as { error: { code: string } }).error.code, 'BAD_RANGE');
+  assert.equal((await run({ fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' })).status, 200);
 });

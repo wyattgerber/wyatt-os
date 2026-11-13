@@ -151,6 +151,17 @@ export class MockProvider implements QueryProvider {
           entityname, trantype, tranid, trandate, duedate, openamount: amt.toFixed(2),
         }));
       }
+      case 'periods': {
+        const out: Record<string, unknown>[] = [];
+        for (let y = 2025; y <= 2027; y++) {
+          for (let m = 0; m < 12; m++) {
+            const start = new Date(Date.UTC(y, m, 1));
+            const end = new Date(Date.UTC(y, m + 1, 0));
+            out.push({ name: mockPeriodName(start.toISOString().slice(0, 10)), startdate: start.toISOString().slice(0, 10), enddate: end.toISOString().slice(0, 10) });
+          }
+        }
+        return out;
+      }
       default:
         throw new Error(`mock: no data for ${q.report}`);
     }

@@ -1,4 +1,4 @@
-import { Me, ReportResult, ReportsResponse } from '../types';
+import { Me, Period, ReportResult, ReportsResponse } from '../types';
 
 /** Thrown with a message that is already safe/friendly to show. */
 export class FriendlyError extends Error {
@@ -36,6 +36,7 @@ async function call<T>(path: string, init?: RequestInit, retries = 2): Promise<T
 
 export const getMe = () => call<Me>('/api/me');
 export const getReports = () => call<ReportsResponse>('/api/reports');
+export const getPeriods = () => call<{ periods: Period[] }>('/api/periods');
 /** POST is not auto-retried: a pull is read-only but slow, so the user decides whether to run it again. */
 export const runReport = (report: string, params: Record<string, string>) =>
   call<ReportResult>('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report, params }) }, 0);

@@ -1,7 +1,7 @@
-import { FriendlyError, getMe, getReports, runReport } from './api';
+import { FriendlyError, getMe, getPeriods, getReports, runReport } from './api';
 import { signIn } from './auth';
 import { readSavedPull, writeReport } from './excelWriter';
-import { ReportMeta } from '../types';
+import { Period, ReportMeta } from '../types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 let reports: ReportMeta[] = [];
@@ -23,14 +23,20 @@ const loadForm = (): { report?: string; params?: Record<string, string> } => {
 };
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const PERIOD_PARAMS = new Set(['period', 'fromPeriod', 'toPeriod']);
+/** Monthly periods from NetSuite that have started, newest first. Empty if they could not be loaded (falls back to typing). */
+let periods: Period[] = [];
+
 function defaultFor(name: string): string {
   const now = new Date();
   if (name === 'startDate') return iso(new Date(now.getFullYear(), now.getMonth(), 1));
   if (name === 'endDate' || name === 'asOfDate') return iso(now);
-  // Period names like "Oct 2026": default to last month (the usual month being closed/reviewed).
-  if (name === 'period' || name === 'fromPeriod' || name === 'toPeriod') {
+  // Periods: default to last month (the usual month being closed/reviewed), if NetSuite has it.
+  if (PERIOD_PARAMS.has(name)) {
     const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return `${last.toLocaleString('en-US', { month: 'short' })} ${last.getFullYear()}`;
+    const want = `${last.toLocaleString('en-US', { month: 'short' })} ${last.getFullYear()}`;
+    if (periods.length === 0 || periods.some((p) => p.name === want)) return want;
+    return periods[Math.min(1, periods.length - 1)].name;
   }
   return '';
 }
@@ -41,7 +47,7 @@ function current(): ReportMeta {
 
 function readParams(): Record<string, string> {
   const out: Record<string, string> = {};
-  $('params').querySelectorAll('input').forEach((i) => { if (i.value.trim()) out[i.name] = i.value.trim(); });
+  $('params').querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select').forEach((i) => { if (i.value.trim()) out[i.name] = i.value.trim(); });
   return out;
 }
 
@@ -53,13 +59,25 @@ function renderParams(values: Record<string, string> = {}) {
     const label = document.createElement('label');
     label.textContent = p.label;
     label.htmlFor = `p_${p.name}`;
-    const input = document.createElement('input');
+    let input: HTMLInputElement | HTMLSelectElement;
+    const value = values[p.name] ?? defaultFor(p.name);
+    if (PERIOD_PARAMS.has(p.name) && periods.length > 0) {
+      // Pick from NetSuite's real periods: a typo can't produce an empty report.
+      const sel = document.createElement('select');
+      sel.append(...periods.map((x) => new Option(x.name, x.name)));
+      sel.value = periods.some((x) => x.name === value) ? value : defaultFor(p.name);
+      sel.addEventListener('change', saveForm);
+      input = sel;
+    } else {
+      const inp = document.createElement('input');
+      inp.type = p.type === 'date' ? 'date' : 'text';
+      inp.value = value;
+      inp.addEventListener('input', saveForm);
+      input = inp;
+    }
     input.id = `p_${p.name}`;
     input.name = p.name;
-    input.type = p.type === 'date' ? 'date' : 'text';
-    input.value = values[p.name] ?? defaultFor(p.name);
     input.required = p.required;
-    input.addEventListener('input', saveForm);
     box.append(label, input);
     if (p.help) { const h = document.createElement('div'); h.className = 'muted'; h.textContent = p.help; box.append(h); }
   }
@@ -108,7 +126,9 @@ async function boot() {
     }
     $('who').textContent = `Signed in as ${me.email}`;
     $('mock').hidden = !me.mock;
-    const list = await getReports();
+    const [list, per] = await Promise.all([getReports(), getPeriods().catch(() => ({ periods: [] as Period[] }))]);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    periods = per.periods.filter((p) => p.start <= todayIso).reverse(); // started periods, newest first
     reports = list.reports;
     const sel = $<HTMLSelectElement>('report');
     sel.replaceChildren(...reports.map((r) => new Option(r.title, r.id)));

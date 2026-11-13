@@ -1,7 +1,7 @@
 // Writes a ReportResult to a worksheet. Rules:
 //  - number formats are set BEFORE values (text columns use "@", so a memo like "=HYPERLINK(...)" stays inert text);
 //  - 5,000-row batches, one sync per batch;
-//  - a Pull Info block sits above the table;
+//  - the table starts at A1 with its header frozen; a Pull Info block sits to the right of it;
 //  - report id + parameters are saved as worksheet custom properties (ExcelApi 1.12) so Refresh can re-run.
 
 import { Column, ReportResult } from '../types';
@@ -43,13 +43,24 @@ function sheetNameFor(result: ReportResult, existing: Set<string>): string {
   return name;
 }
 
+function easternTime(isoUtc: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
+    }).format(new Date(isoUtc));
+  } catch {
+    return `${isoUtc} (UTC)`;
+  }
+}
+
 function infoRows(r: ReportResult): [string, string | number, 'text' | 'money' | 'int'][] {
   const i = r.info;
   const rows: [string, string | number, 'text' | 'money' | 'int'][] = [
     ['NetSuite pull', i.title, 'text'],
     ['Parameters', Object.entries(i.params).map(([k, v]) => `${k}=${v}`).join('; ') || '(none)', 'text'],
     ['Pulled by', i.user, 'text'],
-    ['Pulled at (UTC)', i.pulledAt, 'text'],
+    ['Pulled at (US Eastern)', easternTime(i.pulledAt), 'text'],
     ['Rows', i.rowCount, 'int'],
   ];
   if (i.debits !== null) rows.push(['Debits', Number(i.debits), 'money']);
@@ -88,40 +99,43 @@ export async function writeReport(result: ReportResult, refresh = false): Promis
       sheet = sheets.add(sheetNameFor(result, new Set(sheets.items.map((s) => s.name.toLowerCase()))));
     }
 
-    // Pull Info block (formats first, then values).
-    const info = infoRows(result);
-    const infoRange = sheet.getRangeByIndexes(0, 0, info.length, 2);
-    infoRange.numberFormat = info.map(([, , t]) => ['@', FORMATS[t]]);
-    infoRange.values = info.map(([label, value]) => [label, value]);
-    sheet.getRangeByIndexes(0, 0, info.length, 1).format.font.bold = true;
-    await context.sync();
-
-    // Table header.
+    // Layout: the table starts at A1 with its header row frozen; the Pull Info block sits to the right of it
+    // (one empty column between), so it never pushes the data down or eats frozen screen space.
     const cols = result.columns;
-    const headerRow0 = info.length + 1; // one blank row between
-    const header = sheet.getRangeByIndexes(headerRow0, 0, 1, cols.length);
+    const header = sheet.getRangeByIndexes(0, 0, 1, cols.length);
     header.numberFormat = [cols.map(() => '@')];
     header.values = [cols.map((c) => c.label)];
     await context.sync();
 
-    // Data in batches.
+    // Data in batches (formats first, then values).
     const rowFormats = cols.map((c) => FORMATS[c.type]);
     for (let off = 0; off < result.rows.length; off += BATCH) {
       const slice = result.rows.slice(off, off + BATCH);
-      const range = sheet.getRangeByIndexes(headerRow0 + 1 + off, 0, slice.length, cols.length);
+      const range = sheet.getRangeByIndexes(1 + off, 0, slice.length, cols.length);
       range.numberFormat = slice.map(() => rowFormats);
       range.values = slice.map((r) => cols.map((c, i) => toCell(c, r[i] ?? '')));
       await context.sync();
     }
 
     if (result.rows.length > 0) {
-      const tableRange = sheet.getRangeByIndexes(headerRow0, 0, result.rows.length + 1, cols.length);
+      const tableRange = sheet.getRangeByIndexes(0, 0, result.rows.length + 1, cols.length);
       const table = sheet.tables.add(tableRange, true);
       table.name = `NS_${result.info.report}_${Date.now()}`;
       table.style = 'TableStyleLight9';
       tableRange.format.autofitColumns();
       await context.sync();
     }
+
+    // Pull Info block to the right (formats first, then values).
+    const info = infoRows(result);
+    const infoCol = cols.length + 1;
+    const infoRange = sheet.getRangeByIndexes(0, infoCol, info.length, 2);
+    infoRange.numberFormat = info.map(([, , t]) => ['@', FORMATS[t]]);
+    infoRange.values = info.map(([label, value]) => [label, value]);
+    sheet.getRangeByIndexes(0, infoCol, info.length, 1).format.font.bold = true;
+    infoRange.format.autofitColumns();
+    sheet.freezePanes.freezeRows(1);
+    await context.sync();
 
     await setProp(context, sheet, PROP_REPORT, result.info.report);
     await setProp(context, sheet, PROP_PARAMS, JSON.stringify(result.info.params));

@@ -17,11 +17,12 @@ Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
 | `api/src/lib/catalog.ts` | **All SQL lives here.** Report definitions, parameter validation, SuiteQL builders |
 | `api/src/lib/runReport.ts` | Totals check, row cap, paging, exact reconciliation gate |
 | `api/src/lib/netsuite.ts` | OAuth M2M JWT + SuiteQL client (retries, token cache) |
-| `api/src/lib/service.ts` | `/api/me`, `/api/reports`, `/api/run` logic + AUDIT log line |
+| `api/src/lib/service.ts` | `/api/me`, `/api/reports`, `/api/periods` (real monthly periods, cached 10 min), `/api/run` logic (rejects unknown periods / reversed ranges) + AUDIT log line |
 | `api/src/lib/{auth,config,money,mock,errors,types}.ts` | principal header, app settings, BigInt money, mock data, errors, shared types |
 | `api/src/functions/api.ts` | Azure Functions v4 HTTP bindings (thin) |
 | `api/test/api.test.ts` | 12 tests (mock data) |
 | `addin/manifest.xml` | Office add-in manifest (placeholders for the SWA host) |
+| `addin/preview/` | **Dev-only** preview: runs the real task pane in Chromium with the real API code in mock mode and a stand-in for Excel; `npm run preview` checks sign-in, period dropdowns, formats-before-values, frozen header, Refresh, and writes screenshots to `preview/out/` |
 | `addin/src/taskpane/` | `taskpane.ts` UI, `api.ts` fetch, `auth.ts` dialog sign-in, `excelWriter.ts` sheet writer, `signin-complete.html` |
 | `scripts/New-NetSuiteCert.ps1` | Creates EC P-256 key + 730-day cert; private key goes straight to 1Password |
 | `scripts/Test-NetSuite.ps1` | Totals check, `accountingperiod` visibility, write-rejection tests |
@@ -36,7 +37,7 @@ Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
 - **Reconciled or nothing.** `runReport` runs NetSuite COUNT/SUM first, enforces `NETSUITE_MAX_ROWS` (default 20,000), pages 1,000 rows x 3 concurrent, and returns data only if row count and every money sum match exactly (BigInt, no floats) and the totals did not change during the pull.
 - **Identity** only from `x-ms-client-principal`; allowlist in `ALLOWED_USERS`. `/api/me` -> `{email, allowed, role, mock}`.
 - **Audit:** one `AUDIT {...}` log line per pull (success and failure) to App Insights.
-- **Excel:** number formats set before values; text columns `@` (blocks formula injection); 5,000-row batches; Pull Info block on top; Refresh re-runs from worksheet custom properties (ExcelApi 1.12).
+- **Excel:** table starts at A1 with its header row frozen; Pull Info block to the right of the table (pulled-at time in US Eastern); number formats set before values; text columns `@` (blocks formula injection); 5,000-row batches; Refresh re-runs from worksheet custom properties (ExcelApi 1.12). Periods are picked from dropdowns of NetSuite's real periods.
 - **Mock mode** (`NETSUITE_MOCK=true`): fake data + red banner. The API refuses to start in mock mode when it detects Azure (`WEBSITE_*` env vars). Never set it in Azure.
 - **Secrets:** 1Password only (`op://NetSuite/NetSuite Sandbox M2M`: `private_key`, `client_id`, `certificate_id`, `account_id`, `cert_expires`). In Azure they arrive as injected app settings. `staticwebapp.config.json` is IT-owned: never edit it here.
 

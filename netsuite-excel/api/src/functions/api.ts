@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
-import { meService, reportsService, runService, Reply } from '../lib/service';
+import { meService, periodsService, reportsService, runService, Reply } from '../lib/service';
 
 const PRINCIPAL = 'x-ms-client-principal';
 
@@ -19,6 +19,14 @@ app.http('reports', {
   methods: ['GET'],
   authLevel: 'anonymous',
   handler: async (req: HttpRequest): Promise<HttpResponseInit> => toResponse(await reportsService(req.headers.get(PRINCIPAL))),
+});
+
+app.http('periods', {
+  route: 'periods',
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  handler: async (req: HttpRequest, ctx: InvocationContext): Promise<HttpResponseInit> =>
+    toResponse(await periodsService(req.headers.get(PRINCIPAL), { log: (m) => ctx.log(m) })),
 });
 
 app.http('run', {
