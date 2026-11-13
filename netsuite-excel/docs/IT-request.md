@@ -36,7 +36,7 @@
 - The NetSuite key and ids live in 1Password (`NetSuite` vault). Please tell me the approved way to hand them to you for the app settings (e.g. share the 1Password item with an IT admin). **Not by email or chat.**
 
 ### 5. Source repository
-- The code is currently in a **personal private GitHub repo** (`wyattgerber/wyatt-os`). If production deployments must come from the **Nussbaum-Transportation** GitHub organization, please create a repo there (or tell me the process) and connect the SWA to it.
+- The code is in my **personal private GitHub repo** (`wyattgerber/wyatt-os`), and I'd like the SWA to deploy from it (SWA's standard GitHub Actions integration; `main` = production). Please confirm that is allowed. If production must deploy from the **Nussbaum-Transportation** organization instead, tell me the process.
 
 ### 6. Node.js on my PC (developer only)
 Node.js is a JavaScript runtime used to build and test the add-in and API.
