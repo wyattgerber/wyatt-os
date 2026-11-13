@@ -31,11 +31,23 @@ export function buildClientAssertion(c, nowSec = Math.floor(Date.now() / 1000)) 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class NetSuiteClient {
-          token;
+  token; // { value, expiresAt } once signed in
   constructor(creds, log = () => {}, fetchImpl = fetch) {
     this.creds = creds;
     this.log = log;
     this.fetchImpl = fetchImpl;
+  }
+
+  /** fetch(), but a network failure becomes a friendly error whose detail (for logs) names the real cause. */
+  async send(url, init) {
+    try {
+      return await this.fetchImpl(url, init);
+    } catch (e) {
+      const c = e && e.cause;
+      const why = c ? `${c.code ?? ''} ${c.message ?? ''}`.trim() : String((e && e.message) || e);
+      this.log(`NetSuite unreachable: ${why}`);
+      throw new ApiError(502, 'NS_UNREACHABLE', 'Could not reach NetSuite. Please try again; if it keeps happening, contact the report owner.', why);
+    }
   }
 
           async getToken(force = false) {
@@ -45,7 +57,7 @@ export class NetSuiteClient {
       client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
       client_assertion: buildClientAssertion(this.creds),
     });
-    const res = await this.fetchImpl(`${hostFor(this.creds.accountId)}/services/rest/auth/oauth2/v1/token`, {
+    const res = await this.send(`${hostFor(this.creds.accountId)}/services/rest/auth/oauth2/v1/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
@@ -63,7 +75,7 @@ export class NetSuiteClient {
     const url = `${hostFor(this.creds.accountId)}/services/rest/query/v1/suiteql?limit=${limit}&offset=${offset}`;
     let refreshed = false;
     for (let attempt = 0; attempt < 4; attempt++) {
-      const res = await this.fetchImpl(url, {
+      const res = await this.send(url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${await this.getToken()}`,

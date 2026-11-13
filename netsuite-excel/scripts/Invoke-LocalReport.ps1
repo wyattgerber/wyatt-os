@@ -21,7 +21,9 @@ param(
     [string]$Vault = 'NetSuite',
     [string]$Item = 'Excel Addin Connection',
     [string]$User = (git config user.email),
-    [string]$OutFile
+    [string]$OutFile,
+    # Corporate HTTPS inspection: make Node trust the Windows certificate store, like PowerShell does (Node 22.15+).
+    [switch]$UseWindowsCertificates
 )
 
 Set-StrictMode -Version Latest
@@ -55,7 +57,9 @@ try {
     Remove-Item Env:NETSUITE_MOCK -ErrorAction SilentlyContinue   # real NetSuite, never mock
 
     $argList = @($cli, $Report) + ($Params.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" })
-    node @argList
+    $oldNodeOptions = $env:NODE_OPTIONS
+    if ($UseWindowsCertificates) { $env:NODE_OPTIONS = (@($env:NODE_OPTIONS, '--use-system-ca') | Where-Object { $_ }) -join ' ' }
+    try { node @argList } finally { $env:NODE_OPTIONS = $oldNodeOptions }
     $code = $LASTEXITCODE
 }
 finally {

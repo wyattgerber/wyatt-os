@@ -8,7 +8,7 @@ import { principalFromHeader } from '../src/lib/auth.js';
 import { MockProvider } from '../src/lib/mock.js';
 import { runReport } from '../src/lib/runReport.js';
 import { meService, periodsService, reportsService, runService } from '../src/lib/service.js';
-import { buildClientAssertion } from '../src/lib/netsuite.js';
+import { buildClientAssertion, NetSuiteClient } from '../src/lib/netsuite.js';
 
 const principal = (email) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
 const ENV = { NETSUITE_MOCK: 'true', ALLOWED_USERS: 'ann@example.com, bob@example.com' };
@@ -316,4 +316,19 @@ test('periods: /api/periods lists real periods; runs reject unknown names and re
   const reversed = await run({ fromPeriod: 'Oct 2026', toPeriod: 'Sep 2026' });
   assert.equal((reversed.body).error.code, 'BAD_RANGE');
   assert.equal((await run({ fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' })).status, 200);
+});
+
+test('network failure reaching NetSuite: friendly message, real cause kept for the logs', async () => {
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  const logs = [];
+  const failingFetch = async () => {
+    throw new TypeError('fetch failed', { cause: { code: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', message: 'unable to get local issuer certificate' } });
+  };
+  const client = new NetSuiteClient({ accountId: '3816459_SB1', clientId: 'c', certificateId: 'k', privateKeyPem: pem }, (m) => logs.push(m), failingFetch);
+  await assert.rejects(
+    client.query({ report: 'gl_detail', kind: 'totals', params: {}, sql: 'SELECT 1' }, 0, 1),
+    (e) => e.code === 'NS_UNREACHABLE' && /UNABLE_TO_GET_ISSUER_CERT_LOCALLY/.test(e.detail) && !/certificate/.test(e.message),
+  );
+  assert.match(logs.join(' '), /unable to get local issuer certificate/);
 });
