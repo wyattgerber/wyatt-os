@@ -42,7 +42,7 @@ test('params: unknown, malformed and injected values are rejected', () => {
 
 test('catalog: every row query has ORDER BY; SQL is built only from validated values', () => {
   const samples: Record<string, Record<string, string>> = {
-    trial_balance: { asOfDate: '2026-10-31' },
+    trial_balance: { period: 'Oct 2026' },
     journal_entries: OCT,
     gl_detail: { ...OCT, account: '1000' },
     ar_aging: {},
@@ -169,4 +169,22 @@ test('config: mock is refused on Azure; real mode without NetSuite settings fail
     env: { ALLOWED_USERS: 'ann@example.com' } as NodeJS.ProcessEnv,
   });
   assert.equal(unconfigured.status, 503);
+});
+
+test('trial balance: by posting period, FYTD P&L, one calculated retained-earnings row, no injection', async () => {
+  const tb = getReport('trial_balance');
+  assert.throws(() => validateParams(tb, { period: "Oct 2026' OR '1'='1" }), /Period must be/);
+  assert.throws(() => validateParams(tb, {}), /required/);
+  const { totals, rows } = tb.build(validateParams(tb, { period: 'Oct 2026' }));
+  for (const sql of [totals, rows]) {
+    assert.match(sql, /accountingperiod/);
+    assert.match(sql, /periodname = 'Oct 2026'/);
+    assert.match(sql, /RE-CALC|COUNT\(DISTINCT/);
+  }
+  assert.match(rows, /GROUP BY/);
+  assert.match(rows, /Retained Earnings \(calculated/);
+  const r = await runService(principal('ann@example.com'), JSON.stringify({ report: 'trial_balance', params: { period: 'Oct 2026' } }), { env: ENV });
+  assert.equal(r.status, 200);
+  const body = r.body as { info: { balanced: boolean } };
+  assert.equal(body.info.balanced, true); // every transaction balances, so a cumulative TB must too
 });

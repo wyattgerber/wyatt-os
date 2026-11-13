@@ -20,6 +20,7 @@ export interface ReportDef extends ReportMeta {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ACCOUNT_RE = /^[A-Za-z0-9._-]{1,30}$/;
+const PERIOD_RE = /^[A-Za-z0-9 .-]{1,30}$/;
 const MAX_PARAM_LEN = 64;
 
 export function isIsoDate(s: string): boolean {
@@ -54,6 +55,9 @@ export function validateParams(def: ReportDef, raw: unknown): Record<string, str
     }
     if (spec.name === 'account' && !ACCOUNT_RE.test(s)) {
       throw new ApiError(400, 'BAD_ACCOUNT', 'Account must be an account number (letters, digits, . _ - only).');
+    }
+    if (spec.name === 'period' && !PERIOD_RE.test(s)) {
+      throw new ApiError(400, 'BAD_PERIOD', 'Period must be an accounting period name like "Oct 2026" (letters, digits, spaces, . - only).');
     }
     out[spec.name] = s;
   }
@@ -107,11 +111,40 @@ const lineSums = [
 
 // ---------- reports ----------
 
+// Trial Balance by POSTING PERIOD (UNVERIFIED SuiteQL: accountingperiod columns periodname/startdate/enddate/isyear/isquarter).
+//  - Balance-sheet accounts: cumulative through the end of the chosen period.
+//  - P&L accounts: fiscal year-to-date only (periods from the fiscal-year start through the chosen period).
+//  - Prior fiscal years' P&L is rolled into ONE synthetic "Retained Earnings (calculated)" row, so the whole TB
+//    balances and the rows' sums equal the totals query exactly.
+const PL_TYPES = `'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'`;
+
+function tbParts(period: string) {
+  // One-row inline view with the period's start/end and its fiscal-year start. MAX() makes it exactly one row
+  // (NULLs if the name matches nothing -> empty TB, visible). No subqueries in GROUP BY/ORDER BY (Oracle rejects them).
+  const per =
+    `(SELECT p.pstart AS pstart, p.pend AS pend, ` +
+    `(SELECT MAX(y.startdate) FROM accountingperiod y WHERE y.isyear = 'T' AND y.startdate <= p.pstart) AS fystart ` +
+    `FROM (SELECT MAX(tp.startdate) AS pstart, MAX(tp.enddate) AS pend FROM accountingperiod tp ` +
+    `WHERE tp.periodname = '${period}' AND tp.isquarter = 'F' AND tp.isyear = 'F') p)`;
+  const priorPL = `(a.accttype IN (${PL_TYPES}) AND pp.startdate < per.fystart)`;
+  const from =
+    `FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction ` +
+    `INNER JOIN accountingperiod pp ON pp.id = t.postingperiod INNER JOIN account a ON a.id = tal.account ` +
+    `INNER JOIN ${per} per ON 1 = 1`;
+  // fystart IS NOT NULL: if no fiscal year is found, return nothing rather than a silently cumulative P&L.
+  const where = `${TAL_BASE} AND per.fystart IS NOT NULL AND pp.enddate <= per.pend`;
+  const key = `CASE WHEN ${priorPL} THEN 0 ELSE tal.account END`;
+  const num = `CASE WHEN ${priorPL} THEN 'RE-CALC' ELSE a.acctnumber END`;
+  const name = `CASE WHEN ${priorPL} THEN 'Retained Earnings (calculated: prior-year P&L)' ELSE BUILTIN.DF(tal.account) END`;
+  const type = `CASE WHEN ${priorPL} THEN 'RetainedEarningsCalc' ELSE a.accttype END`;
+  return { from, where, key, num, name, type };
+}
+
 const trialBalance: ReportDef = {
   id: 'trial_balance',
   title: 'Trial Balance',
   validated: false,
-  params: [{ name: 'asOfDate', label: 'As of date', type: 'date', required: true }],
+  params: [{ name: 'period', label: 'Accounting period (e.g. Oct 2026)', type: 'text', required: true }],
   columns: [
     { key: 'acctnumber', label: 'Account #', type: 'text' },
     { key: 'acctname', label: 'Account', type: 'text' },
@@ -121,20 +154,21 @@ const trialBalance: ReportDef = {
     { key: 'balance', label: 'Net (Dr - Cr)', type: 'money' },
   ],
   notes: [
-    'NOT a real trial balance yet: filters on transaction date, not posting period.',
-    'P&L accounts are cumulative since the company started, not fiscal YTD, and there is no retained-earnings line.',
-    'Do not use for close until reconciled to the NetSuite Trial Balance report.',
+    'By posting period: balance-sheet accounts cumulative; P&L accounts fiscal year-to-date; prior-year P&L rolled into one calculated Retained Earnings row.',
+    'All subsidiaries combined, accounting book 1. The period name must match exactly one monthly posting period.',
+    'SuiteQL for accounting periods is UNVERIFIED. Reconcile to the NetSuite Trial Balance report before use.',
   ],
   sums: lineSums,
   build(p) {
-    const where = `${TAL_BASE} AND t.trandate <= ${toDate(p.asOfDate)}`;
+    const t = tbParts(p.period);
     return {
-      totals: `SELECT COUNT(DISTINCT tal.account) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ${TAL_FROM} WHERE ${where}`,
+      totals:
+        `SELECT COUNT(DISTINCT ${t.key}) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ` +
+        `${t.from} WHERE ${t.where}`,
       rows:
-        `SELECT a.acctnumber AS acctnumber, BUILTIN.DF(tal.account) AS acctname, a.accttype AS accttype, ` +
-        `ROUND(SUM(tal.debit), 2) AS debit, ROUND(SUM(tal.credit), 2) AS credit ${TAL_FROM} ` +
-        `INNER JOIN account a ON a.id = tal.account WHERE ${where} ` +
-        `GROUP BY tal.account, a.acctnumber, a.accttype, BUILTIN.DF(tal.account) ORDER BY a.acctnumber, tal.account`,
+        `SELECT ${t.num} AS acctnumber, ${t.name} AS acctname, ${t.type} AS accttype, ` +
+        `ROUND(SUM(tal.debit), 2) AS debit, ROUND(SUM(tal.credit), 2) AS credit ${t.from} WHERE ${t.where} ` +
+        `GROUP BY ${t.key}, ${t.num}, ${t.name}, ${t.type} ORDER BY ${t.num}, ${t.key}`,
     };
   },
   derive(row) {

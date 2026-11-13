@@ -74,6 +74,14 @@ const OPEN_AP = [
   ['Mock Vendor B', 'VendBill', 'BILL3002', '2026-10-25', '2026-11-24', 2210],
 ] as const;
 
+/** Mock only: "Oct 2026" -> "2026-10-31". Ignores fiscal-year / retained-earnings logic (real SQL does that). */
+function mockPeriodEnd(period: string): string {
+  const d = new Date(`${period} 1 UTC`);
+  if (Number.isNaN(d.getTime())) throw new Error('mock: unknown period');
+  const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  return end.toISOString().slice(0, 10);
+}
+
 const sumOf = (xs: bigint[]) => xs.reduce((a, b) => a + b, 0n);
 
 export class MockProvider implements QueryProvider {
@@ -100,7 +108,7 @@ export class MockProvider implements QueryProvider {
     switch (q.report) {
       case 'trial_balance': {
         const byAcct = new Map<string, { l: Line; d: bigint; c: bigint }>();
-        for (const l of LINES.filter((x) => x.trandate <= p.asOfDate)) {
+        for (const l of LINES.filter((x) => x.trandate <= mockPeriodEnd(p.period))) {
           const e = byAcct.get(l.acctnumber) ?? { l, d: 0n, c: 0n };
           e.d += l.debit;
           e.c += l.credit;
