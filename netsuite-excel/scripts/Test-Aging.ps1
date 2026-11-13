@@ -15,6 +15,8 @@
 [CmdletBinding()]
 param(
     [switch]$Probe,
+    # Probe line-level open amounts and names on AR/AP lines (journals carry their own open amounts).
+    [switch]$ProbeLines,
     [string]$Vault = 'NetSuite',
     [string]$Item = 'Excel Addin Connection'
 )
@@ -24,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/NsCommon.ps1"
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
 
-if (-not $Probe) { throw 'Only -Probe is implemented so far. Run: ./Test-Aging.ps1 -Probe' }
+if (-not ($Probe -or $ProbeLines)) { throw 'Only the probes are implemented so far: ./Test-Aging.ps1 -Probe  or  -ProbeLines' }
 
 function Show-Table($items, [string[]]$Cols) {
     $items = @($items | Where-Object { $null -ne $_ })
@@ -37,6 +39,28 @@ $conn = $null
 try {
     $conn = Connect-NetSuite $Vault $Item
     $types = "'CustInvc', 'CustCred', 'CustPymt', 'CustDep', 'CustRfnd', 'VendBill', 'VendCred', 'VendPymt', 'Journal'"
+
+    if ($ProbeLines) {
+        $join = "FROM transactionline tl INNER JOIN transaction t ON t.id = tl.transaction " +
+                "INNER JOIN transactionaccountingline tal ON tal.transaction = tl.transaction AND tal.transactionline = tl.id " +
+                "INNER JOIN account a ON a.id = tal.account " +
+                "WHERE tal.posting = 'T' AND tal.accountingbook = 1 AND a.accttype IN ('AcctRec', 'AcctPay')"
+        Write-Host "C) Line-level open-amount fields on AR/AP lines (non-zero values, by account type and transaction type):`n"
+        foreach ($f in 'foreignamountunpaid', 'foreignamountpaid', 'foreignpaymentamountunused', 'foreignpaymentamountused', 'amountunpaid', 'foreignamountremaining') {
+            $r = Invoke-SuiteQL $conn ("SELECT a.accttype AS kind, t.type AS trantype, COUNT(*) AS n, ROUND(SUM(tl.$f), 2) AS total $join " +
+                "AND NVL(tl.$f, 0) <> 0 GROUP BY a.accttype, t.type ORDER BY a.accttype, t.type")
+            if ($r.Status -eq 200) { Write-Host "[OK]   transactionline.$f" -ForegroundColor Green; Show-Table (Get-Items $r.Body) @('kind', 'trantype', 'n', 'total') }
+            else { Write-Host "[FAIL] transactionline.$f -> HTTP $($r.Status): $(Format-NsError $r)`n" -ForegroundColor Red }
+        }
+        Write-Host "D) Do AR/AP lines name a customer/vendor? (transactionline.entity; needed to age journal lines by name)"
+        $r = Invoke-SuiteQL $conn ("SELECT a.accttype AS kind, t.type AS trantype, COUNT(*) AS n, " +
+            "SUM(CASE WHEN tl.entity IS NULL THEN 1 ELSE 0 END) AS no_entity, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits " +
+            "$join GROUP BY a.accttype, t.type ORDER BY a.accttype, t.type")
+        if ($r.Status -eq 200) { Show-Table (Get-Items $r.Body) @('kind', 'trantype', 'n', 'no_entity', 'debits', 'credits') }
+        else { Write-Host "[FAIL] transactionline.entity -> HTTP $($r.Status): $(Format-NsError $r)" -ForegroundColor Red }
+        Write-Host 'Expected if my theory is right: AP journal lines open total 3,460,845.75 (credit); AR journal lines open net 1,448,859.63 (debit).'
+        return
+    }
 
     Write-Host "A) Open-amount fields on transaction (posting transactions with a non-zero value, by type):`n"
     foreach ($f in 'amountunpaid', 'foreignamountunpaid', 'amountremaining', 'foreignamountremaining', 'paymentamountunused', 'foreignpaymentamountunused') {
