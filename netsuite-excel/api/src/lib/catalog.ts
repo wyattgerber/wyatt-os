@@ -223,7 +223,7 @@ const glDetail: ReportDef = {
   columns: lineColumns,
   notes: [
     'All posting lines, accounting book 1, by posting period (same basis as the Trial Balance).',
-    'Validated 2026-11-13 (sandbox), Oct 2026: 2,230 lines; every account ties to TB(Oct) - TB(Sep); six accounts match NetSuite\'s General Ledger report. The Account # filter has not been run against NetSuite yet.',
+    'Validated 2026-11-13 (sandbox), Oct 2026: 2,230 lines; every account ties to TB(Oct) - TB(Sep); six accounts match NetSuite\'s General Ledger report; the Account # filter was checked on account 1040.',
   ],
   sums: lineSums,
   build(p) {

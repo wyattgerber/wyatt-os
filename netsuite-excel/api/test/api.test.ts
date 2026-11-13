@@ -257,6 +257,11 @@ test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
   const glA = getReport('gl_detail').build({ fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026', account: '1040' });
   assert.equal(lineA.totalsSql, glA.totals);
   assert.equal(lineA.rowsSql, glA.rows);
+  const je = evalBlock('je', {});
+  const lineJ = evalBlock('line', { From: 'Oct 2026', To: 'Oct 2026', ExtraWhere: je.extra });
+  const jeTs = getReport('journal_entries').build({ fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026' });
+  assert.equal(lineJ.totalsSql, jeTs.totals);
+  assert.equal(lineJ.rowsSql, jeTs.rows);
   const tbv = evalBlock('tb', { Period: 'Oct 2026' });
   const tb = getReport('trial_balance').build({ period: 'Oct 2026' });
   assert.equal(tbv.totalsSql, tb.totals);

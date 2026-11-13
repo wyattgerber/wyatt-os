@@ -104,6 +104,13 @@ function Get-GlAccountFilter([string]$Account) {
     return $extra
 }
 
+function Get-JournalFilter {
+    # BEGIN-SQL je
+    $extra = " AND t.type = 'Journal'"
+    # END-SQL je
+    return $extra
+}
+
 function Get-TbSql([string]$Period) {
     # BEGIN-SQL tb
     $per = "(SELECT p.pstart AS pstart, p.pend AS pend, (SELECT MAX(y.startdate) FROM accountingperiod y WHERE y.isyear = 'T' AND y.startdate <= p.pstart) AS fystart " +

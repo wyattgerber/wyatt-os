@@ -21,6 +21,8 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9 .-]{1,30}$')][string]$ToPeriod,
     # Optional: exercise the report's Account # filter. The TB tie then compares just that account.
     [ValidatePattern('^[A-Za-z0-9._-]{1,30}$')][string]$Account,
+    # Check the Journal Entries report instead (same query + journal-only filter). Compare with a NetSuite saved search.
+    [switch]$JournalOnly,
     [string]$Vault = 'NetSuite',
     [string]$Item = 'Excel Addin Connection'
 )
@@ -38,8 +40,12 @@ function Report([bool]$Ok, [string]$Msg) {
 $conn = $null
 try {
     $conn = Connect-NetSuite $Vault $Item
-    $sql = if ($Account) { Get-LineSql $FromPeriod $ToPeriod (Get-GlAccountFilter $Account) } else { Get-LineSql $FromPeriod $ToPeriod }
+    if ($Account -and $JournalOnly) { throw 'Use -Account or -JournalOnly, not both (the Journal Entries report has no account filter).' }
+    $sql = if ($Account) { Get-LineSql $FromPeriod $ToPeriod (Get-GlAccountFilter $Account) }
+           elseif ($JournalOnly) { Get-LineSql $FromPeriod $ToPeriod (Get-JournalFilter) }
+           else { Get-LineSql $FromPeriod $ToPeriod }
     if ($Account) { Write-Host "Account filter: $Account" }
+    if ($JournalOnly) { Write-Host 'JOURNAL ENTRIES report (journal transactions only)' }
 
     # ---- 1) range ----
     $r = Invoke-SuiteQL $conn "SELECT rg.rstart AS rstart, rg.rend AS rend FROM $($sql.Range) rg"
@@ -64,6 +70,11 @@ try {
     if ($Account) { Write-Host '[SKIP] Balanced check (a single account need not balance).' -ForegroundColor Yellow }
     else { Report ($td -eq $tcr) ("Balanced: debits {0:N2} = credits {1:N2}" -f $td, $tcr) }
     if ($Account) { Report (@($rows | Where-Object { (Get-Prop $_ 'acctnumber') -ne $Account }).Count -eq 0) "Every line belongs to account $Account" }
+    if ($JournalOnly) {
+        Report (@($rows | Where-Object { (Get-Prop $_ 'trantype') -ne 'Journal' }).Count -eq 0) 'Every line is a Journal'
+        $je = @($rows | ForEach-Object { Get-Prop $_ 'tranid' } | Sort-Object -Unique)
+        Write-Host "Distinct journal entries: $($je.Count) (compare with the saved search's count of journals, if it shows one)"
+    }
 
     # ---- by-account movement from the GL lines ----
     $gl = @{}
@@ -79,7 +90,10 @@ try {
     $prev = if ($prevQ.Status -eq 200 -and @(Get-Prop $prevQ.Body 'items').Count -gt 0) { Get-Prop $prevQ.Body.items[0] 'periodname' } else { $null }
     $fyTo = Get-Prop (Invoke-SuiteQL $conn "SELECT per.fystart AS fystart FROM $((Get-TbSql $ToPeriod).Per) per").Body.items[0] 'fystart'
     $fyPrev = if ($prev) { Get-Prop (Invoke-SuiteQL $conn "SELECT per.fystart AS fystart FROM $((Get-TbSql $prev).Per) per").Body.items[0] 'fystart' } else { $null }
-    if (-not $prev -or "$fyTo" -ne "$fyPrev") {
+    if ($JournalOnly) {
+        Write-Host '[SKIP] TB tie (the TB includes all transaction types; journals alone cannot tie to it).' -ForegroundColor Yellow
+    }
+    elseif (-not $prev -or "$fyTo" -ne "$fyPrev") {
         Write-Host "[SKIP] TB tie: the period before '$FromPeriod' ($prev) is in a different fiscal year, so TB differences include the year-end roll. Pick a range that doesn't start in the fiscal year's first period." -ForegroundColor Yellow
     }
     else {
@@ -113,7 +127,7 @@ try {
     # ---- outputs ----
     $outDir = Join-Path $PSScriptRoot '..\api\out'
     New-Item -ItemType Directory -Force $outDir | Out-Null
-    $tag = (($FromPeriod + '_to_' + $ToPeriod + $(if ($Account) { "_acct_$Account" } else { '' })) -replace '[^A-Za-z0-9_]', '_')
+    $tag = (($FromPeriod + '_to_' + $ToPeriod + $(if ($Account) { "_acct_$Account" } elseif ($JournalOnly) { '_journals' } else { '' })) -replace '[^A-Za-z0-9_]', '_')
     $rows | ForEach-Object {
         [pscustomobject]@{ period = Get-Prop $_ 'postingperiod'; date = Get-Prop $_ 'trandate'; type = Get-Prop $_ 'trantype'; tranid = Get-Prop $_ 'tranid'
             acctnumber = Get-Prop $_ 'acctnumber'; acctname = Get-Prop $_ 'acctname'; name = Get-Prop $_ 'entityname'; subsidiary = Get-Prop $_ 'subsidiary'
