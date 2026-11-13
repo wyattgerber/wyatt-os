@@ -114,8 +114,8 @@ const lineSums = [
 // Trial Balance by POSTING PERIOD (UNVERIFIED SuiteQL: accountingperiod columns periodname/startdate/enddate/isyear/isquarter).
 //  - Balance-sheet accounts: cumulative through the end of the chosen period.
 //  - P&L accounts: fiscal year-to-date only (periods from the fiscal-year start through the chosen period).
-//  - Prior fiscal years' P&L is rolled into ONE synthetic "Retained Earnings (calculated)" row, so the whole TB
-//    balances and the rows' sums equal the totals query exactly.
+//  - Prior fiscal years' P&L is rolled into the system retained-earnings account (netted with its own balance),
+//    matching NetSuite's Trial Balance report. Rows' sums still equal the totals query exactly.
 const PL_TYPES = `'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'`;
 
 function tbParts(period: string) {
@@ -127,16 +127,22 @@ function tbParts(period: string) {
     `FROM (SELECT MAX(tp.startdate) AS pstart, MAX(tp.enddate) AS pend FROM accountingperiod tp ` +
     `WHERE tp.periodname = '${period}' AND tp.isquarter = 'F' AND tp.isyear = 'F') p)`;
   const priorPL = `(a.accttype IN (${PL_TYPES}) AND pp.startdate < per.fystart)`;
+  // Prior-year P&L is rolled INTO the system retained-earnings account (sspecacct = 'RetEarnings', verified: 3400),
+  // netted with that account's own balance, exactly like NetSuite's Trial Balance report.
+  // Names come from account.accountsearchdisplayname (verified); BUILTIN.DF on a derived id errors in SuiteQL.
   const from =
     `FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction ` +
     `INNER JOIN accountingperiod pp ON pp.id = t.postingperiod INNER JOIN account a ON a.id = tal.account ` +
-    `INNER JOIN ${per} per ON 1 = 1`;
+    `INNER JOIN ${per} per ON 1 = 1 ` +
+    `INNER JOIN (SELECT MAX(id) AS reid FROM account WHERE sspecacct = 'RetEarnings') rx ON 1 = 1 ` +
+    `INNER JOIN account rea ON rea.id = rx.reid`;
   // fystart IS NOT NULL: if no fiscal year is found, return nothing rather than a silently cumulative P&L.
+  // The INNER JOIN to rea likewise returns nothing if no retained-earnings account exists.
   const where = `${TAL_BASE} AND per.fystart IS NOT NULL AND pp.enddate <= per.pend`;
-  const key = `CASE WHEN ${priorPL} THEN 0 ELSE tal.account END`;
-  const num = `CASE WHEN ${priorPL} THEN 'RE-CALC' ELSE a.acctnumber END`;
-  const name = `CASE WHEN ${priorPL} THEN 'Retained Earnings (calculated: prior-year P&L)' ELSE BUILTIN.DF(tal.account) END`;
-  const type = `CASE WHEN ${priorPL} THEN 'RetainedEarningsCalc' ELSE a.accttype END`;
+  const key = `CASE WHEN ${priorPL} THEN rea.id ELSE a.id END`;
+  const num = `CASE WHEN ${priorPL} THEN rea.acctnumber ELSE a.acctnumber END`;
+  const name = `CASE WHEN ${priorPL} THEN rea.accountsearchdisplayname ELSE a.accountsearchdisplayname END`;
+  const type = `CASE WHEN ${priorPL} THEN rea.accttype ELSE a.accttype END`;
   return { from, where, key, num, name, type };
 }
 
@@ -154,7 +160,7 @@ const trialBalance: ReportDef = {
     { key: 'balance', label: 'Net (Dr - Cr)', type: 'money' },
   ],
   notes: [
-    'By posting period: balance-sheet accounts cumulative; P&L accounts fiscal year-to-date; prior-year P&L rolled into one calculated Retained Earnings row.',
+    'By posting period: balance-sheet accounts cumulative; P&L accounts fiscal year-to-date; prior-year P&L rolled into the retained-earnings account, as NetSuite does.',
     'All subsidiaries combined, accounting book 1. The period name must match exactly one monthly posting period.',
     'SuiteQL for accounting periods is UNVERIFIED. Reconcile to the NetSuite Trial Balance report before use.',
   ],

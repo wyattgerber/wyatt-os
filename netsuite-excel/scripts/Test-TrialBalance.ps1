@@ -100,12 +100,12 @@ try {
            "FROM (SELECT MAX(tp.startdate) AS pstart, MAX(tp.enddate) AS pend FROM accountingperiod tp WHERE tp.periodname = '$Period' AND tp.isquarter = 'F' AND tp.isyear = 'F') p)"
     $plTypes = "'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'"
     $priorPL = "(a.accttype IN ($plTypes) AND pp.startdate < per.fystart)"
-    $from = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction INNER JOIN accountingperiod pp ON pp.id = t.postingperiod INNER JOIN account a ON a.id = tal.account INNER JOIN ' + $per + ' per ON 1 = 1'
+    $from = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction INNER JOIN accountingperiod pp ON pp.id = t.postingperiod INNER JOIN account a ON a.id = tal.account INNER JOIN ' + $per + ' per ON 1 = 1 INNER JOIN (SELECT MAX(id) AS reid FROM account WHERE sspecacct = ''RetEarnings'') rx ON 1 = 1 INNER JOIN account rea ON rea.id = rx.reid'
     $where = "tal.posting = 'T' AND tal.accountingbook = 1 AND per.fystart IS NOT NULL AND pp.enddate <= per.pend"
-    $key = "CASE WHEN $priorPL THEN 0 ELSE tal.account END"
-    $num = "CASE WHEN $priorPL THEN 'RE-CALC' ELSE a.acctnumber END"
-    $name = "CASE WHEN $priorPL THEN 'Retained Earnings (calculated: prior-year P&L)' ELSE BUILTIN.DF(tal.account) END"
-    $type = "CASE WHEN $priorPL THEN 'RetainedEarningsCalc' ELSE a.accttype END"
+    $key = "CASE WHEN $priorPL THEN rea.id ELSE a.id END"
+    $num = "CASE WHEN $priorPL THEN rea.acctnumber ELSE a.acctnumber END"
+    $name = "CASE WHEN $priorPL THEN rea.accountsearchdisplayname ELSE a.accountsearchdisplayname END"
+    $type = "CASE WHEN $priorPL THEN rea.accttype ELSE a.accttype END"
     $totalsSql = "SELECT COUNT(DISTINCT $key) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits $from WHERE $where"
     $rowsSql = "SELECT $num AS acctnumber, $name AS acctname, $type AS accttype, ROUND(SUM(tal.debit), 2) AS debit, ROUND(SUM(tal.credit), 2) AS credit $from WHERE $where GROUP BY $key, $num, $name, $type ORDER BY $num, $key"
 
@@ -146,15 +146,17 @@ try {
         if ($net -gt 0) { $netDr += $net } else { $netCr += (-$net) }
     }
     Write-Host ("NET totals (compare with the footer of NetSuite's Trial Balance report): Debit {0:N2} | Credit {1:N2}" -f $netDr, $netCr)
-    $re = @($all | Where-Object { (Get-Prop $_ 'acctnumber') -eq 'RE-CALC' })
-    Write-Host $(if ($re.Count -eq 1) { "Retained Earnings (calculated) row: debit=$((ConvertTo-Dec (Get-Prop $re[0] 'debit')).ToString('N2', $inv)) credit=$((ConvertTo-Dec (Get-Prop $re[0] 'credit')).ToString('N2', $inv))" } else { "No calculated Retained Earnings row (count=$($re.Count)): there is no prior-year P&L, or the fiscal-year logic did not apply." })
+    $req = Invoke-SuiteQL "SELECT acctnumber FROM account WHERE sspecacct = 'RetEarnings'"
+    $reAcct = if ($req.Status -eq 200 -and $req.Body.items.Count -eq 1) { Get-Prop $req.Body.items[0] 'acctnumber' } else { $null }
+    $re = @($all | Where-Object { $null -ne $reAcct -and (Get-Prop $_ 'acctnumber') -eq $reAcct })
+    Write-Host $(if ($re.Count -eq 1) { "Retained-earnings account $reAcct (own balance + prior-year P&L): debit=$((ConvertTo-Dec (Get-Prop $re[0] 'debit')).ToString('N2', $inv)) credit=$((ConvertTo-Dec (Get-Prop $re[0] 'credit')).ToString('N2', $inv))" } else { "Retained-earnings account row not found (count=$($re.Count))." })
 
     $reNetAbs = $null
     if ($re.Count -eq 1) { $reNetAbs = [math]::Abs((ConvertTo-Dec (Get-Prop $re[0] 'debit')) - (ConvertTo-Dec (Get-Prop $re[0] 'credit'))) }
     if ($NetSuiteFooter -ge 0) {
         $diff = $netDr - $NetSuiteFooter
         Write-Host ("`nDIAGNOSTIC: mine {0:N2} - NetSuite footer {1:N2} = difference {2:N2}" -f $netDr, $NetSuiteFooter, $diff) -ForegroundColor Yellow
-        if ($null -ne $reNetAbs) { Write-Host ("Calculated retained-earnings row net = {0:N2}; (that minus the difference) = {1:N2}" -f $reNetAbs, ($reNetAbs - [math]::Abs($diff))) }
+        if ($null -ne $reNetAbs) { Write-Host ("Retained-earnings account net = {0:N2}" -f $reNetAbs) }
         Write-Host 'Accounts whose |net| equals the difference, or RE-calc minus the difference:'
         foreach ($x in $all) {
             $n = [math]::Abs((ConvertTo-Dec (Get-Prop $x 'debit')) - (ConvertTo-Dec (Get-Prop $x 'credit')))

@@ -171,7 +171,7 @@ test('config: mock is refused on Azure; real mode without NetSuite settings fail
   assert.equal(unconfigured.status, 503);
 });
 
-test('trial balance: by posting period, FYTD P&L, one calculated retained-earnings row, no injection', async () => {
+test('trial balance: by posting period, FYTD P&L, prior-year P&L into the RE account, no injection', async () => {
   const tb = getReport('trial_balance');
   assert.throws(() => validateParams(tb, { period: "Oct 2026' OR '1'='1" }), /Period must be/);
   assert.throws(() => validateParams(tb, {}), /required/);
@@ -179,10 +179,12 @@ test('trial balance: by posting period, FYTD P&L, one calculated retained-earnin
   for (const sql of [totals, rows]) {
     assert.match(sql, /accountingperiod/);
     assert.match(sql, /periodname = 'Oct 2026'/);
-    assert.match(sql, /RE-CALC|COUNT\(DISTINCT/);
+    assert.match(sql, /sspecacct = 'RetEarnings'/); // prior-year P&L rolls into the real RE account
   }
   assert.match(rows, /GROUP BY/);
-  assert.match(rows, /Retained Earnings \(calculated/);
+  const groupBy = rows.slice(rows.indexOf('GROUP BY'));
+  assert.doesNotMatch(groupBy, /SELECT/, 'no subqueries in GROUP BY/ORDER BY (Oracle rejects them)');
+  assert.doesNotMatch(rows, /BUILTIN\.DF/, 'BUILTIN.DF on a derived id fails in SuiteQL');
   const r = await runService(principal('ann@example.com'), JSON.stringify({ report: 'trial_balance', params: { period: 'Oct 2026' } }), { env: ENV });
   assert.equal(r.status, 200);
   const body = r.body as { info: { balanced: boolean } };
