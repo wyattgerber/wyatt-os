@@ -199,12 +199,12 @@ const trialBalance: ReportDef = {
 const journalEntries: ReportDef = {
   id: 'journal_entries',
   title: 'Journal Entries',
-  validated: false,
+  validated: true,
   params: periodRangeParams,
   columns: lineColumns,
   notes: [
     "Posting lines of transactions with type 'Journal' (type code seen in the sandbox), by posting period.",
-    'Not yet compared to a NetSuite saved search.',
+    'Validated 2026-11-13 (sandbox), Oct 2026: 545 lines, 58 journals, debits = credits = 17,128,952.80, matching a NetSuite saved search (Type = Journal, Posting, period Oct 2026) exactly.',
   ],
   sums: lineSums,
   build(p) {
