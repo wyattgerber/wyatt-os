@@ -12,7 +12,7 @@
   Keep the 1Password app unlocked. Do not call `op whoami` in this script (it breaks the next op call here).
 
 .EXAMPLE
-  ./Invoke-LocalReport.ps1 -Report gl_detail -Params @{ startDate = '2026-10-01'; endDate = '2026-10-31' }
+  ./Invoke-LocalReport.ps1 -Report gl_detail -Params @{ fromPeriod = 'Oct 2026'; toPeriod = 'Oct 2026' }
 #>
 [CmdletBinding()]
 param(

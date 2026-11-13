@@ -25,6 +25,8 @@ Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
 | `addin/src/taskpane/` | `taskpane.ts` UI, `api.ts` fetch, `auth.ts` dialog sign-in, `excelWriter.ts` sheet writer, `signin-complete.html` |
 | `scripts/New-NetSuiteCert.ps1` | Creates EC P-256 key + 730-day cert; private key goes straight to 1Password |
 | `scripts/Test-NetSuite.ps1` | Totals check, `accountingperiod` visibility, write-rejection tests |
+| `scripts/Test-TrialBalance.ps1`, `scripts/Test-GLDetail.ps1` | Run the report SQL against the sandbox from PowerShell (no Node) and check it: reconciliation gate, balance, GL-to-TB tie |
+| `scripts/NsCommon.ps1` | Shared sign-in/SuiteQL helpers + **copies of the catalog SQL**; `npm test` fails if they drift from `catalog.ts` |
 | `scripts/Invoke-LocalReport.ps1` | Runs one report through the real API code against the sandbox from your PC (secrets from 1Password, no Azure); `api/src/cli.ts` is its entry point |
 | `docs/IT-request.md` | Draft IT request (not sent) |
 
@@ -72,7 +74,7 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 ## Known problems (not done)
 
 1. **Trial Balance is validated** (see results above). Not supported: per-subsidiary TB, other accounting books. Re-validate if the chart of accounts' retained-earnings setup changes.
-2. **Still `validated: false`:** Journal Entries (vs a saved search), GL Detail (vs TB), AR/AP aging (vs control accounts).
+2. **Still `validated: false`:** GL Detail (run `Test-GLDetail.ps1`, then spot-check accounts vs NetSuite's General Ledger report), Journal Entries (vs a saved search), AR/AP aging (vs control accounts). GL Detail and Journal Entries now filter by **posting period range** (From/To period), the same basis as the Trial Balance.
 3. **Unverified assumptions:** JE type code `'Journal'`; aging fields `amountunpaid` / `paymentamountunused` and which types count as open (CustInvc/CustCred/CustPymt, VendBill/VendCred/VendPymt); account/subsidiary/memo column names (`transactionline.subsidiary`, `BUILTIN.DF`); 1Password field labels and `op item create` stdin form; aging uses US Eastern time; that SuiteQL returns money as strings/numbers parseable to <=6 decimals.
 4. **No subsidiary filter.** Aging covers current open items only.
 5. **SWA managed Functions time out at ~45 s.** If pulls approach that, switch to client-driven paging.

@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { getReport, listReports, validateParams } from '../src/lib/catalog';
@@ -12,7 +14,7 @@ import { BuiltQuery, QueryProvider } from '../src/lib/types';
 
 const principal = (email: string) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
 const ENV = { NETSUITE_MOCK: 'true', ALLOWED_USERS: 'ann@example.com, bob@example.com' } as NodeJS.ProcessEnv;
-const OCT = { startDate: '2026-10-01', endDate: '2026-10-31' };
+const OCT = { fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026' };
 
 test('money: exact BigInt parse/format, no float drift, fails closed', () => {
   assert.equal(parseMoney('0.10') + parseMoney('0.20'), parseMoney('0.30')); // floats would fail this
@@ -33,10 +35,11 @@ test('money: exact BigInt parse/format, no float drift, fails closed', () => {
 test('params: unknown, malformed and injected values are rejected', () => {
   const gl = getReport('gl_detail');
   assert.throws(() => validateParams(gl, { ...OCT, sql: 'DROP' }), /Unknown parameter/);
-  assert.throws(() => validateParams(gl, { startDate: '2026-02-30', endDate: '2026-03-01' }), /real date/);
-  assert.throws(() => validateParams(gl, { startDate: '2026-10-31', endDate: '2026-10-01' }), /End date/);
+  assert.throws(() => validateParams(gl, { fromPeriod: "Oct 2026'--", toPeriod: 'Oct 2026' }), /Period must be/);
+  assert.throws(() => validateParams(gl, { fromPeriod: 'Oct 2026', toPeriod: "x') OR ('1'='1" }), /Period must be/);
+  assert.throws(() => validateParams(gl, { ...OCT, startDate: '2026-10-01' }), /Unknown parameter/); // old date params are gone
   assert.throws(() => validateParams(gl, { ...OCT, account: "1000' OR '1'='1" }), /Account must be/);
-  assert.throws(() => validateParams(gl, { startDate: '2026-10-01' }), /required/);
+  assert.throws(() => validateParams(gl, { fromPeriod: 'Oct 2026' }), /required/);
   assert.deepEqual(validateParams(gl, { ...OCT, account: ' 1000 ' }), { ...OCT, account: '1000' });
 });
 
@@ -208,4 +211,49 @@ test('NetSuite omits null columns: missing debit/credit read as 0.00 and still r
   assert.ok(res.rows.every((r) => r[di] !== '' && r[ci] !== ''), 'no blank money cells');
   assert.ok(res.rows.some((r) => r[di] === '0.00') && res.rows.some((r) => r[ci] === '0.00'));
   assert.equal(res.info.reconciliation, 'PASS');
+});
+
+test('GL / JE: filter on posting period range (same basis as the TB), period column first, no subqueries in ORDER BY', () => {
+  for (const id of ['gl_detail', 'journal_entries']) {
+    const def = getReport(id);
+    assert.equal(def.columns[0].key, 'postingperiod');
+    const { totals, rows } = def.build(validateParams(def, { fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' }));
+    for (const sql of [totals, rows]) {
+      assert.match(sql, /pp\.startdate >= rg\.rstart AND pp\.enddate <= rg\.rend/);
+      assert.match(sql, /periodname = 'Sep 2026'/);
+      assert.match(sql, /periodname = 'Oct 2026'/);
+      assert.doesNotMatch(sql, /trandate >=|trandate <=/, 'no transaction-date filter any more');
+    }
+    assert.doesNotMatch(rows.slice(rows.indexOf('ORDER BY')), /SELECT/);
+  }
+});
+
+// The PowerShell test scripts carry a copy of the SQL (they cannot import TypeScript). Evaluate the
+// simple string assignments between BEGIN-SQL/END-SQL in scripts/NsCommon.ps1 and require an exact match.
+test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
+  const src = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'NsCommon.ps1'), 'utf8');
+  const evalBlock = (tag: string, vars: Record<string, string>) => {
+    let blk = src.slice(src.indexOf(`# BEGIN-SQL ${tag}`) + `# BEGIN-SQL ${tag}`.length, src.indexOf(`# END-SQL ${tag}`));
+    blk = blk.replace(/"\s*\+\s*\n\s*"/g, '').replace(/'\s*\+\s*\n\s*'/g, '');
+    for (const line of blk.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const m = /^\$(\w+)\s*=\s*(.*)$/.exec(line);
+      assert.ok(m, `unexpected line in ${tag} block: ${line}`);
+      let out = '';
+      for (const p of m[2].matchAll(/'((?:[^']|'')*)'|"([^"]*)"|\$(\w+)/g)) {
+        if (p[3] !== undefined) out += vars[p[3]];
+        else if (p[1] !== undefined) out += p[1].replace(/''/g, "'");
+        else out += p[2].replace(/\$(\w+)/g, (_, v: string) => vars[v]);
+      }
+      vars[m[1]] = out;
+    }
+    return vars;
+  };
+  const line = evalBlock('line', { From: 'Sep 2026', To: 'Oct 2026', ExtraWhere: '' });
+  const gl = getReport('gl_detail').build({ fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' });
+  assert.equal(line.totalsSql, gl.totals);
+  assert.equal(line.rowsSql, gl.rows);
+  const tbv = evalBlock('tb', { Period: 'Oct 2026' });
+  const tb = getReport('trial_balance').build({ period: 'Oct 2026' });
+  assert.equal(tbv.totalsSql, tb.totals);
+  assert.equal(tbv.rowsSql, tb.rows);
 });

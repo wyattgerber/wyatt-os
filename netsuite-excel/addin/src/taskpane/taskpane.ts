@@ -27,6 +27,11 @@ function defaultFor(name: string): string {
   const now = new Date();
   if (name === 'startDate') return iso(new Date(now.getFullYear(), now.getMonth(), 1));
   if (name === 'endDate' || name === 'asOfDate') return iso(now);
+  // Period names like "Oct 2026": default to last month (the usual month being closed/reviewed).
+  if (name === 'period' || name === 'fromPeriod' || name === 'toPeriod') {
+    const last = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${last.toLocaleString('en-US', { month: 'short' })} ${last.getFullYear()}`;
+  }
   return '';
 }
 

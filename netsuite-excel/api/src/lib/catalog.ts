@@ -21,6 +21,7 @@ export interface ReportDef extends ReportMeta {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ACCOUNT_RE = /^[A-Za-z0-9._-]{1,30}$/;
 const PERIOD_RE = /^[A-Za-z0-9 .-]{1,30}$/;
+const PERIOD_PARAMS = new Set(['period', 'fromPeriod', 'toPeriod']);
 const MAX_PARAM_LEN = 64;
 
 export function isIsoDate(s: string): boolean {
@@ -56,29 +57,26 @@ export function validateParams(def: ReportDef, raw: unknown): Record<string, str
     if (spec.name === 'account' && !ACCOUNT_RE.test(s)) {
       throw new ApiError(400, 'BAD_ACCOUNT', 'Account must be an account number (letters, digits, . _ - only).');
     }
-    if (spec.name === 'period' && !PERIOD_RE.test(s)) {
+    if (PERIOD_PARAMS.has(spec.name) && !PERIOD_RE.test(s)) {
       throw new ApiError(400, 'BAD_PERIOD', 'Period must be an accounting period name like "Oct 2026" (letters, digits, spaces, . - only).');
     }
     out[spec.name] = s;
-  }
-  if (out.startDate && out.endDate && out.endDate < out.startDate) {
-    throw new ApiError(400, 'BAD_RANGE', 'End date must be on or after the start date.');
   }
   return out;
 }
 
 // ---------- SQL fragments (only ever fed validated values) ----------
 
-const toDate = (iso: string) => `TO_DATE('${iso}', 'YYYY-MM-DD')`;
 const TAL_FROM = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction';
 const TAL_BASE = `tal.posting = 'T' AND tal.accountingbook = 1`;
 
-const dateParams: ParamSpec[] = [
-  { name: 'startDate', label: 'Start date', type: 'date', required: true },
-  { name: 'endDate', label: 'End date', type: 'date', required: true },
+const periodRangeParams: ParamSpec[] = [
+  { name: 'fromPeriod', label: 'From period (e.g. Oct 2026)', type: 'text', required: true },
+  { name: 'toPeriod', label: 'To period (e.g. Oct 2026)', type: 'text', required: true },
 ];
 
 const lineColumns: Column[] = [
+  { key: 'postingperiod', label: 'Period', type: 'text' },
   { key: 'trandate', label: 'Date', type: 'date' },
   { key: 'trantype', label: 'Type', type: 'text' },
   { key: 'tranid', label: 'Transaction #', type: 'text' },
@@ -91,16 +89,32 @@ const lineColumns: Column[] = [
   { key: 'credit', label: 'Credit', type: 'money' },
 ];
 
-function lineQueries(where: string) {
+// Line-level reports filter on POSTING PERIOD (same basis as the validated Trial Balance), From..To inclusive.
+// One-row range view: MAX(CASE..) keeps it exactly one row; an unknown period name gives NULL -> no rows (visible).
+function periodRange(from: string, to: string): string {
+  return (
+    `(SELECT MAX(CASE WHEN tp.periodname = '${from}' THEN tp.startdate END) AS rstart, ` +
+    `MAX(CASE WHEN tp.periodname = '${to}' THEN tp.enddate END) AS rend FROM accountingperiod tp ` +
+    `WHERE tp.isquarter = 'F' AND tp.isyear = 'F' AND tp.periodname IN ('${from}', '${to}'))`
+  );
+}
+
+function lineQueries(p: Record<string, string>, extraWhere: string) {
+  const from =
+    `${TAL_FROM} INNER JOIN accountingperiod pp ON pp.id = t.postingperiod ` +
+    `INNER JOIN ${periodRange(p.fromPeriod, p.toPeriod)} rg ON 1 = 1`;
+  const where = `${TAL_BASE} AND pp.startdate >= rg.rstart AND pp.enddate <= rg.rend${extraWhere}`;
   return {
-    totals: `SELECT COUNT(*) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ${TAL_FROM} WHERE ${where}`,
+    // Totals use only the joins needed to filter; the row query adds account + transactionline joins,
+    // so the gate also proves those joins neither drop nor duplicate lines.
+    totals: `SELECT COUNT(*) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ${from} WHERE ${where}`,
     rows:
-      `SELECT TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, t.type AS trantype, t.tranid AS tranid, ` +
-      `a.acctnumber AS acctnumber, BUILTIN.DF(tal.account) AS acctname, BUILTIN.DF(t.entity) AS entityname, ` +
+      `SELECT pp.periodname AS postingperiod, TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, t.type AS trantype, t.tranid AS tranid, ` +
+      `a.acctnumber AS acctnumber, a.accountsearchdisplayname AS acctname, BUILTIN.DF(t.entity) AS entityname, ` +
       `BUILTIN.DF(tl.subsidiary) AS subsidiary, tl.memo AS memo, tal.debit AS debit, tal.credit AS credit ` +
-      `${TAL_FROM} INNER JOIN account a ON a.id = tal.account ` +
+      `${from} INNER JOIN account a ON a.id = tal.account ` +
       `LEFT JOIN transactionline tl ON tl.transaction = tal.transaction AND tl.id = tal.transactionline ` +
-      `WHERE ${where} ORDER BY t.trandate, t.id, tal.transactionline, tal.account`,
+      `WHERE ${where} ORDER BY pp.startdate, t.trandate, t.id, tal.transactionline, tal.account`,
   };
 }
 
@@ -186,17 +200,15 @@ const journalEntries: ReportDef = {
   id: 'journal_entries',
   title: 'Journal Entries',
   validated: false,
-  params: dateParams,
+  params: periodRangeParams,
   columns: lineColumns,
   notes: [
-    "Posting lines of transactions with type 'Journal' (UNVERIFIED type code), filtered on transaction date.",
+    "Posting lines of transactions with type 'Journal' (type code seen in the sandbox), by posting period.",
     'Not yet compared to a NetSuite saved search.',
   ],
   sums: lineSums,
   build(p) {
-    return lineQueries(
-      `${TAL_BASE} AND t.type = 'Journal' AND t.trandate >= ${toDate(p.startDate)} AND t.trandate <= ${toDate(p.endDate)}`,
-    );
+    return lineQueries(p, ` AND t.type = 'Journal'`);
   },
 };
 
@@ -205,16 +217,14 @@ const glDetail: ReportDef = {
   title: 'GL Detail',
   validated: false,
   params: [
-    ...dateParams,
+    ...periodRangeParams,
     { name: 'account', label: 'Account # (optional)', type: 'text', required: false, help: 'Leave blank for all accounts' },
   ],
   columns: lineColumns,
-  notes: ['All posting lines, accounting book 1, filtered on transaction date.', 'Not yet reconciled to the Trial Balance.'],
+  notes: ['All posting lines, accounting book 1, by posting period (same basis as the Trial Balance).', 'Not yet validated against NetSuite.'],
   sums: lineSums,
   build(p) {
-    let where = `${TAL_BASE} AND t.trandate >= ${toDate(p.startDate)} AND t.trandate <= ${toDate(p.endDate)}`;
-    if (p.account) where += ` AND tal.account IN (SELECT id FROM account WHERE acctnumber = '${p.account}')`;
-    return lineQueries(where);
+    return lineQueries(p, p.account ? ` AND tal.account IN (SELECT id FROM account WHERE acctnumber = '${p.account}')` : '');
   },
 };
 

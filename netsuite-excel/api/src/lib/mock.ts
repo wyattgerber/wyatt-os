@@ -74,6 +74,16 @@ const OPEN_AP = [
   ['Mock Vendor B', 'VendBill', 'BILL3002', '2026-10-25', '2026-11-24', 2210],
 ] as const;
 
+/** Mock only: "Oct 2026" -> "2026-10-01". */
+function mockPeriodStart(period: string): string {
+  return `${mockPeriodEnd(period).slice(0, 8)}01`;
+}
+
+/** Mock only: "2026-10-15" -> "Oct 2026". */
+function mockPeriodName(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
 /** Mock only: "Oct 2026" -> "2026-10-31". Ignores fiscal-year / retained-earnings logic (real SQL does that). */
 function mockPeriodEnd(period: string): string {
   const d = new Date(`${period} 1 UTC`);
@@ -122,13 +132,13 @@ export class MockProvider implements QueryProvider {
       case 'gl_detail': {
         return LINES.filter(
           (l) =>
-            l.trandate >= p.startDate && l.trandate <= p.endDate &&
+            l.trandate >= mockPeriodStart(p.fromPeriod) && l.trandate <= mockPeriodEnd(p.toPeriod) &&
             (q.report === 'gl_detail' || l.trantype === 'Journal') &&
             (!p.account || l.acctnumber === p.account),
         )
           .sort((a, b) => a.trandate.localeCompare(b.trandate) || a.id - b.id || a.lineno - b.lineno || a.acctnumber.localeCompare(b.acctnumber))
           .map((l) => ({
-            trandate: l.trandate, trantype: l.trantype, tranid: l.tranid, acctnumber: l.acctnumber, acctname: l.acctname,
+            postingperiod: mockPeriodName(l.trandate), trandate: l.trandate, trantype: l.trantype, tranid: l.tranid, acctnumber: l.acctnumber, acctname: l.acctname,
             entityname: l.entityname, subsidiary: l.subsidiary, memo: l.memo, debit: m(l.debit), credit: m(l.credit),
           }));
       }
