@@ -63,15 +63,16 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 - Test 1: PASS. Oct 2026 = 2,230 posting lines, debits = credits = 42,216,073.43. Types visible: CustInvc 142, CustPymt 26, Deposit 11, Journal 545, VendBill 1506. (Deposit View had to be added to `API_User`.)
 - Tests 3a/3b: PASS. Customer and account writes are rejected (HTTP 403): the role is read-only.
 - Test 2: PASS after adding **Manage Accounting Periods (View)** to `API_User` (Period Closing Management / Accounting Management were Full-only and were removed).
-- **Trial Balance by posting period (Oct 2026): footer matches NetSuite's report to the cent** (net debit = net credit = 264,219,967.46; 349 rows; reconciliation gate PASS). Still `validated:false` until 3 account spot-checks and a second period across the fiscal-year boundary (e.g. Jan 2026) also match. Run via `scripts/Test-TrialBalance.ps1` (SQL copy; keep in sync with `catalog.ts`).
+- **Trial Balance: VALIDATED.** By posting period, P&L fiscal YTD, prior-year P&L rolled into the retained-earnings account (`sspecacct = 'RetEarnings'`, 3400) like NetSuite. Footers match NetSuite's TB report (Parent Company Consolidated, book 1) to the cent for Oct 2026 (264,219,967.46) and Jan 2026 (57,483,969.65, across the fiscal-year boundary); three Oct 2026 accounts spot-checked. Jan first differed by exactly 3400's net until RE netting matched NetSuite's. Tested via `scripts/Test-TrialBalance.ps1` (SQL copy, verified identical to `catalog.ts`).
+- SuiteQL facts learned: `BUILTIN.DF` on a derived id returns HTTP 500; `account.accountsearchdisplayname` and `account.sspecacct` exist.
 - NetSuite omits null columns from SuiteQL rows (a credit-only account has no `debit`); the API renders those as 0.00.
 - NetSuite returns SUMs as doubles, sometimes in scientific notation (`4.221607343E7`). The API parses exponents exactly and rounds SUMs to cents in SQL (`ROUND(SUM(..), 2)`, unverified against real SuiteQL until the first API run).
 - `op whoami` makes the next `op` call fail on this setup; scripts avoid it.
 
 ## Known problems (not done)
 
-1. **Trial Balance:** rebuilt on posting period + fiscal YTD + calculated retained-earnings row; Oct 2026 footer matches NetSuite. Remaining: account spot-checks + a year-boundary period, then flip `validated`.
-2. **Every report is `validated: false`.** Reconcile each: TB vs NetSuite TB report, JE vs a saved search, GL vs TB, AR/AP aging vs control accounts.
+1. **Trial Balance is validated** (see results above). Not supported: per-subsidiary TB, other accounting books. Re-validate if the chart of accounts' retained-earnings setup changes.
+2. **Still `validated: false`:** Journal Entries (vs a saved search), GL Detail (vs TB), AR/AP aging (vs control accounts).
 3. **Unverified assumptions:** JE type code `'Journal'`; aging fields `amountunpaid` / `paymentamountunused` and which types count as open (CustInvc/CustCred/CustPymt, VendBill/VendCred/VendPymt); account/subsidiary/memo column names (`transactionline.subsidiary`, `BUILTIN.DF`); 1Password field labels and `op item create` stdin form; aging uses US Eastern time; that SuiteQL returns money as strings/numbers parseable to <=6 decimals.
 4. **No subsidiary filter.** Aging covers current open items only.
 5. **SWA managed Functions time out at ~45 s.** If pulls approach that, switch to client-driven paging.

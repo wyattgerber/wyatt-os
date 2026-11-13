@@ -111,7 +111,7 @@ const lineSums = [
 
 // ---------- reports ----------
 
-// Trial Balance by POSTING PERIOD (UNVERIFIED SuiteQL: accountingperiod columns periodname/startdate/enddate/isyear/isquarter).
+// Trial Balance by POSTING PERIOD. VALIDATED (see notes). accountingperiod columns and sspecacct verified on the sandbox.
 //  - Balance-sheet accounts: cumulative through the end of the chosen period.
 //  - P&L accounts: fiscal year-to-date only (periods from the fiscal-year start through the chosen period).
 //  - Prior fiscal years' P&L is rolled into the system retained-earnings account (netted with its own balance),
@@ -149,7 +149,7 @@ function tbParts(period: string) {
 const trialBalance: ReportDef = {
   id: 'trial_balance',
   title: 'Trial Balance',
-  validated: false,
+  validated: true,
   params: [{ name: 'period', label: 'Accounting period (e.g. Oct 2026)', type: 'text', required: true }],
   columns: [
     { key: 'acctnumber', label: 'Account #', type: 'text' },
@@ -162,7 +162,7 @@ const trialBalance: ReportDef = {
   notes: [
     'By posting period: balance-sheet accounts cumulative; P&L accounts fiscal year-to-date; prior-year P&L rolled into the retained-earnings account, as NetSuite does.',
     'All subsidiaries combined, accounting book 1. The period name must match exactly one monthly posting period.',
-    'SuiteQL for accounting periods is UNVERIFIED. Reconcile to the NetSuite Trial Balance report before use.',
+    'Validated 2026-11-13 (sandbox) against the NetSuite Trial Balance report, Parent Company (Consolidated), book 1: Oct 2026 and Jan 2026 footers matched to the cent; three Oct 2026 accounts spot-checked.',
   ],
   sums: lineSums,
   build(p) {
