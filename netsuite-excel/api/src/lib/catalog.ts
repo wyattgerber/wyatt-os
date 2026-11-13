@@ -215,13 +215,16 @@ const journalEntries: ReportDef = {
 const glDetail: ReportDef = {
   id: 'gl_detail',
   title: 'GL Detail',
-  validated: false,
+  validated: true,
   params: [
     ...periodRangeParams,
     { name: 'account', label: 'Account # (optional)', type: 'text', required: false, help: 'Leave blank for all accounts' },
   ],
   columns: lineColumns,
-  notes: ['All posting lines, accounting book 1, by posting period (same basis as the Trial Balance).', 'Not yet validated against NetSuite.'],
+  notes: [
+    'All posting lines, accounting book 1, by posting period (same basis as the Trial Balance).',
+    'Validated 2026-11-13 (sandbox), Oct 2026: 2,230 lines; every account ties to TB(Oct) - TB(Sep); six accounts match NetSuite\'s General Ledger report. The Account # filter has not been run against NetSuite yet.',
+  ],
   sums: lineSums,
   build(p) {
     return lineQueries(p, p.account ? ` AND tal.account IN (SELECT id FROM account WHERE acctnumber = '${p.account}')` : '');

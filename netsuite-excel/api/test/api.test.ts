@@ -55,7 +55,7 @@ test('catalog: every row query has ORDER BY; SQL is built only from validated va
     const { rows, totals } = getReport(r.id).build(validateParams(getReport(r.id), samples[r.id]));
     assert.match(rows, /ORDER BY/, `${r.id} rows need ORDER BY`);
     assert.doesNotMatch(totals + rows, /;|--/, `${r.id} has no statement separators`);
-    assert.equal(r.validated, r.id === 'trial_balance', `${r.id} validated flag`); // only TB has been reconciled to NetSuite
+    assert.equal(r.validated, ['trial_balance', 'gl_detail'].includes(r.id), `${r.id} validated flag`); // reconciled to NetSuite
   }
   assert.equal(listReports().length, 5);
   assert.ok(!JSON.stringify(listReports()).includes('SELECT'), 'client listing must not leak SQL');
@@ -252,6 +252,11 @@ test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
   const gl = getReport('gl_detail').build({ fromPeriod: 'Sep 2026', toPeriod: 'Oct 2026' });
   assert.equal(line.totalsSql, gl.totals);
   assert.equal(line.rowsSql, gl.rows);
+  const acct = evalBlock('glacct', { Account: '1040' });
+  const lineA = evalBlock('line', { From: 'Oct 2026', To: 'Oct 2026', ExtraWhere: acct.extra });
+  const glA = getReport('gl_detail').build({ fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026', account: '1040' });
+  assert.equal(lineA.totalsSql, glA.totals);
+  assert.equal(lineA.rowsSql, glA.rows);
   const tbv = evalBlock('tb', { Period: 'Oct 2026' });
   const tb = getReport('trial_balance').build({ period: 'Oct 2026' });
   assert.equal(tbv.totalsSql, tb.totals);

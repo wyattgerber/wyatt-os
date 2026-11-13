@@ -19,6 +19,8 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9 .-]{1,30}$')][string]$FromPeriod,
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9 .-]{1,30}$')][string]$ToPeriod,
+    # Optional: exercise the report's Account # filter. The TB tie then compares just that account.
+    [ValidatePattern('^[A-Za-z0-9._-]{1,30}$')][string]$Account,
     [string]$Vault = 'NetSuite',
     [string]$Item = 'Excel Addin Connection'
 )
@@ -36,7 +38,8 @@ function Report([bool]$Ok, [string]$Msg) {
 $conn = $null
 try {
     $conn = Connect-NetSuite $Vault $Item
-    $sql = Get-LineSql $FromPeriod $ToPeriod
+    $sql = if ($Account) { Get-LineSql $FromPeriod $ToPeriod (Get-GlAccountFilter $Account) } else { Get-LineSql $FromPeriod $ToPeriod }
+    if ($Account) { Write-Host "Account filter: $Account" }
 
     # ---- 1) range ----
     $r = Invoke-SuiteQL $conn "SELECT rg.rstart AS rstart, rg.rend AS rend FROM $($sql.Range) rg"
@@ -58,7 +61,9 @@ try {
     Report (($rows.Count -eq $tc) -and ($rd -eq $td) -and ($rc -eq $tcr)) 'Reconciliation gate: rows match NetSuite totals exactly (joins neither drop nor duplicate lines).'
 
     # ---- 3) balanced ----
-    Report ($td -eq $tcr) ("Balanced: debits {0:N2} = credits {1:N2}" -f $td, $tcr)
+    if ($Account) { Write-Host '[SKIP] Balanced check (a single account need not balance).' -ForegroundColor Yellow }
+    else { Report ($td -eq $tcr) ("Balanced: debits {0:N2} = credits {1:N2}" -f $td, $tcr) }
+    if ($Account) { Report (@($rows | Where-Object { (Get-Prop $_ 'acctnumber') -ne $Account }).Count -eq 0) "Every line belongs to account $Account" }
 
     # ---- by-account movement from the GL lines ----
     $gl = @{}
@@ -91,6 +96,7 @@ try {
         $tbTo = & $tbNet $ToPeriod
         $tbPrev = & $tbNet $prev
         $keys = @($tbTo.Keys) + @($tbPrev.Keys) + @($gl.Keys) | Sort-Object -Unique
+        if ($Account) { $keys = @($keys | Where-Object { $_ -like "$Account|*" }) }
         $bad = foreach ($k in $keys) {
             $mv = $(if ($tbTo.ContainsKey($k)) { $tbTo[$k] } else { [decimal]0 }) - $(if ($tbPrev.ContainsKey($k)) { $tbPrev[$k] } else { [decimal]0 })
             $g = if ($gl.ContainsKey($k)) { $gl[$k].Debit - $gl[$k].Credit } else { [decimal]0 }
@@ -107,7 +113,7 @@ try {
     # ---- outputs ----
     $outDir = Join-Path $PSScriptRoot '..\api\out'
     New-Item -ItemType Directory -Force $outDir | Out-Null
-    $tag = (($FromPeriod + '_to_' + $ToPeriod) -replace '[^A-Za-z0-9_]', '_')
+    $tag = (($FromPeriod + '_to_' + $ToPeriod + $(if ($Account) { "_acct_$Account" } else { '' })) -replace '[^A-Za-z0-9_]', '_')
     $rows | ForEach-Object {
         [pscustomobject]@{ period = Get-Prop $_ 'postingperiod'; date = Get-Prop $_ 'trandate'; type = Get-Prop $_ 'trantype'; tranid = Get-Prop $_ 'tranid'
             acctnumber = Get-Prop $_ 'acctnumber'; acctname = Get-Prop $_ 'acctname'; name = Get-Prop $_ 'entityname'; subsidiary = Get-Prop $_ 'subsidiary'

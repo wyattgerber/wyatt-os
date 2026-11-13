@@ -74,7 +74,8 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 ## Known problems (not done)
 
 1. **Trial Balance is validated** (see results above). Not supported: per-subsidiary TB, other accounting books. Re-validate if the chart of accounts' retained-earnings setup changes.
-2. **Still `validated: false`:** GL Detail (run `Test-GLDetail.ps1`, then spot-check accounts vs NetSuite's General Ledger report), Journal Entries (vs a saved search), AR/AP aging (vs control accounts). GL Detail and Journal Entries now filter by **posting period range** (From/To period), the same basis as the Trial Balance.
+2. **GL Detail is validated** (Oct 2026: 2,230 lines; all accounts tie to TB(Oct) − TB(Sep); 1040, 1210, 1250, 1300, 1515, 1525 match NetSuite's General Ledger report). Its Account # filter is not yet run against NetSuite (`Test-GLDetail.ps1 -Account <n>`).
+   **Still `validated: false`:** Journal Entries (vs a saved search), AR/AP aging (vs control accounts). GL Detail and Journal Entries now filter by **posting period range** (From/To period), the same basis as the Trial Balance.
 3. **Unverified assumptions:** JE type code `'Journal'`; aging fields `amountunpaid` / `paymentamountunused` and which types count as open (CustInvc/CustCred/CustPymt, VendBill/VendCred/VendPymt); account/subsidiary/memo column names (`transactionline.subsidiary`, `BUILTIN.DF`); 1Password field labels and `op item create` stdin form; aging uses US Eastern time; that SuiteQL returns money as strings/numbers parseable to <=6 decimals.
 4. **No subsidiary filter.** Aging covers current open items only.
 5. **SWA managed Functions time out at ~45 s.** If pulls approach that, switch to client-driven paging.

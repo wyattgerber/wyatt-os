@@ -97,6 +97,13 @@ function Get-LineSql([string]$From, [string]$To, [string]$ExtraWhere = '') {
     return [pscustomobject]@{ Totals = $totalsSql; Rows = $rowsSql; From = $from; Where = $where; Range = $rg }
 }
 
+function Get-GlAccountFilter([string]$Account) {
+    # BEGIN-SQL glacct
+    $extra = " AND tal.account IN (SELECT id FROM account WHERE acctnumber = '$Account')"
+    # END-SQL glacct
+    return $extra
+}
+
 function Get-TbSql([string]$Period) {
     # BEGIN-SQL tb
     $per = "(SELECT p.pstart AS pstart, p.pend AS pend, (SELECT MAX(y.startdate) FROM accountingperiod y WHERE y.isyear = 'T' AND y.startdate <= p.pstart) AS fystart " +
