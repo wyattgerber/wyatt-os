@@ -20,7 +20,10 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9 .-]{1,30}$')][string]$Period,
     [string]$Vault = 'NetSuite',
-    [string]$Item = 'Excel Addin Connection'
+    [string]$Item = 'Excel Addin Connection',
+    # Diagnostics: pass NetSuite's report footer (net debit total) to see the gap and which accounts could explain it.
+    [decimal]$NetSuiteFooter = -1,
+    [switch]$ShowEquity
 )
 
 Set-StrictMode -Version Latest
@@ -125,6 +128,27 @@ try {
     Write-Host ("NET totals (compare with the footer of NetSuite's Trial Balance report): Debit {0:N2} | Credit {1:N2}" -f $netDr, $netCr)
     $re = @($all | Where-Object { (Get-Prop $_ 'acctnumber') -eq 'RE-CALC' })
     Write-Host $(if ($re.Count -eq 1) { "Retained Earnings (calculated) row: debit=$((ConvertTo-Dec (Get-Prop $re[0] 'debit')).ToString('N2', $inv)) credit=$((ConvertTo-Dec (Get-Prop $re[0] 'credit')).ToString('N2', $inv))" } else { "No calculated Retained Earnings row (count=$($re.Count)): there is no prior-year P&L, or the fiscal-year logic did not apply." })
+
+    $reNetAbs = $null
+    if ($re.Count -eq 1) { $reNetAbs = [math]::Abs((ConvertTo-Dec (Get-Prop $re[0] 'debit')) - (ConvertTo-Dec (Get-Prop $re[0] 'credit'))) }
+    if ($NetSuiteFooter -ge 0) {
+        $diff = $netDr - $NetSuiteFooter
+        Write-Host ("`nDIAGNOSTIC: mine {0:N2} - NetSuite footer {1:N2} = difference {2:N2}" -f $netDr, $NetSuiteFooter, $diff) -ForegroundColor Yellow
+        if ($null -ne $reNetAbs) { Write-Host ("Calculated retained-earnings row net = {0:N2}; (that minus the difference) = {1:N2}" -f $reNetAbs, ($reNetAbs - [math]::Abs($diff))) }
+        Write-Host 'Accounts whose |net| equals the difference, or RE-calc minus the difference:'
+        foreach ($x in $all) {
+            $n = [math]::Abs((ConvertTo-Dec (Get-Prop $x 'debit')) - (ConvertTo-Dec (Get-Prop $x 'credit')))
+            $hit1 = [math]::Abs($n - [math]::Abs($diff)) -lt 0.005
+            $hit2 = ($null -ne $reNetAbs) -and ([math]::Abs($n - ($reNetAbs - [math]::Abs($diff))) -lt 0.005)
+            if ($n -gt 0 -and ($hit1 -or $hit2)) { Write-Host ("  {0} {1} ({2}) net={3:N2}  [{4}]" -f (Get-Prop $x 'acctnumber'), (Get-Prop $x 'acctname'), (Get-Prop $x 'accttype'), $n, $(if ($hit1) { 'equals difference' } else { 'equals RE-calc minus difference' })) }
+        }
+    }
+    if ($ShowEquity) {
+        Write-Host "`nEquity accounts (net = debit - credit):"
+        $all | Where-Object { (Get-Prop $_ 'accttype') -eq 'Equity' } | ForEach-Object {
+            [pscustomobject]@{ Account = Get-Prop $_ 'acctnumber'; Name = Get-Prop $_ 'acctname'; Net = ((ConvertTo-Dec (Get-Prop $_ 'debit')) - (ConvertTo-Dec (Get-Prop $_ 'credit'))).ToString('N2', $inv) }
+        } | Format-Table -AutoSize | Out-String | Write-Host
+    }
 
     $outDir = Join-Path $PSScriptRoot '..\api\out'
     New-Item -ItemType Directory -Force $outDir | Out-Null
