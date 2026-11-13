@@ -262,8 +262,42 @@ test('scripts/NsCommon.ps1 SQL copies are identical to catalog.ts', () => {
   const jeTs = getReport('journal_entries').build({ fromPeriod: 'Oct 2026', toPeriod: 'Oct 2026' });
   assert.equal(lineJ.totalsSql, jeTs.totals);
   assert.equal(lineJ.rowsSql, jeTs.rows);
+  for (const [id, vars] of [
+    ['ar_aging', { kindName: 'AcctRec', docType: 'CustInvc', credits: "'CustCred', 'CustPymt'", noName: '- No Customer -', lineAmt: '(NVL(tal.debit, 0) - NVL(tal.credit, 0))' }],
+    ['ap_aging', { kindName: 'AcctPay', docType: 'VendBill', credits: "'VendCred', 'VendPymt'", noName: '- No Vendor -', lineAmt: '(NVL(tal.credit, 0) - NVL(tal.debit, 0))' }],
+  ] as const) {
+    const ag = evalBlock('aging', { ...vars });
+    const agTs = getReport(id).build({});
+    assert.equal(ag.totalsSql, agTs.totals, `${id} totals`);
+    assert.equal(ag.rowsSql, agTs.rows, `${id} rows`);
+  }
   const tbv = evalBlock('tb', { Period: 'Oct 2026' });
   const tb = getReport('trial_balance').build({ period: 'Oct 2026' });
   assert.equal(tbv.totalsSql, tb.totals);
   assert.equal(tbv.rowsSql, tb.rows);
+});
+
+test('aging: verified fields only, journals at full amount, named "no customer/vendor", ties to control account', async () => {
+  for (const [id, kind, noName] of [['ar_aging', 'AcctRec', '- No Customer -'], ['ap_aging', 'AcctPay', '- No Vendor -']] as const) {
+    const { totals, rows } = getReport(id).build({});
+    for (const sql of [totals, rows]) {
+      assert.doesNotMatch(sql, /[^n]amountunpaid|[^n]paymentamountunused|amountremaining/, 'only foreign* fields exist (amountunpaid etc. return HTTP 500)');
+      assert.match(sql, new RegExp(`a\\.accttype = '${kind}'`));
+    }
+    assert.match(totals, /AS control/);
+    assert.match(rows, new RegExp(noName));
+  }
+  // The control-account tie fails closed.
+  class Untied implements QueryProvider {
+    inner = new MockProvider();
+    async query(q: BuiltQuery, offset: number, limit: number) {
+      const res = await this.inner.query(q, offset, limit);
+      if (q.kind === 'totals') res.items[0] = { ...res.items[0], control: '1.00' };
+      return res;
+    }
+  }
+  await assert.rejects(
+    runReport(getReport('ar_aging'), {}, new Untied(), { maxRows: 100, user: 'x', mock: true }),
+    (e: { code?: string; message?: string }) => e.code === 'RECONCILIATION_FAILED' && /control account/.test(e.message ?? ''),
+  );
 });

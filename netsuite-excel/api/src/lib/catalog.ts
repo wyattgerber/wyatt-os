@@ -12,6 +12,8 @@ export interface ReportDef extends ReportMeta {
   build(params: Record<string, string>): { totals: string; rows: string };
   /** Money columns whose row-sum must equal the matching alias in the totals query. */
   sums: { column: string; alias: string }[];
+  /** Pairs of totals-query aliases that must be exactly equal (e.g. aging total = control account), else fail closed. */
+  ties?: { a: string; b: string; message: string }[];
   /** Adds derived columns to a row (all values already strings). `today` is YYYY-MM-DD in US Eastern. */
   derive?(row: Record<string, string>, today: string): Record<string, string>;
 }
@@ -231,7 +233,7 @@ const glDetail: ReportDef = {
   },
 };
 
-// Aging buckets are computed from US Eastern "today". Open-amount fields are UNVERIFIED.
+// Aging buckets are computed from US Eastern "today" by due date (transaction date when there is none), like NetSuite.
 const agingColumns: Column[] = [
   { key: 'entityname', label: 'Name', type: 'text' },
   { key: 'trantype', label: 'Type', type: 'text' },
@@ -262,12 +264,28 @@ function deriveAging(row: Record<string, string>, today: string): Record<string,
   return out;
 }
 
-function agingReport(id: string, title: string, invType: string, otherTypes: string[], what: string): ReportDef {
-  const types = [invType, ...otherTypes].map((t) => `'${t}'`).join(', ');
-  const amount = `CASE WHEN t.type = '${invType}' THEN t.amountunpaid ELSE 0 - t.paymentamountunused END`;
-  const where =
-    `t.type IN (${types}) AND t.posting = 'T' AND ((t.type = '${invType}' AND NVL(t.amountunpaid, 0) <> 0) ` +
-    `OR (t.type <> '${invType}' AND NVL(t.paymentamountunused, 0) <> 0))`;
+// AR/AP Aging, modelled on NetSuite's own A/R and A/P Aging reports (verified 2026-11-13: both report totals equal
+// the control-account balances). Every posting line on an AcctRec/AcctPay account contributes its OPEN amount:
+//   - the invoice/bill line: transactionline.foreignamountunpaid (verified field)
+//   - payments/credits: minus transaction.foreignpaymentamountunused (verified field)
+//   - everything else (journals, mostly): the full line amount, even with no customer/vendor (NetSuite lists those
+//     under "- No Customer -" / "- No Vendor -").
+// Every pull also requires: aging total == control-account balance. If NetSuite ever applies journals against
+// invoices/bills, that tie breaks and the pull fails instead of double counting.
+function agingReport(
+  id: string, title: string, kind: 'AcctRec' | 'AcctPay', docType: string, creditTypes: string[], noName: string, what: string,
+): ReportDef {
+  const lineAmt = kind === 'AcctRec' ? '(NVL(tal.debit, 0) - NVL(tal.credit, 0))' : '(NVL(tal.credit, 0) - NVL(tal.debit, 0))';
+  const credits = creditTypes.map((t) => `'${t}'`).join(', ');
+  const open =
+    `(CASE WHEN t.type = '${docType}' THEN NVL(tl.foreignamountunpaid, 0) ` +
+    `WHEN t.type IN (${credits}) THEN 0 - NVL(t.foreignpaymentamountunused, 0) ELSE ${lineAmt} END)`;
+  const from =
+    'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction ' +
+    'INNER JOIN account a ON a.id = tal.account ' +
+    'LEFT JOIN transactionline tl ON tl.transaction = tal.transaction AND tl.id = tal.transactionline';
+  const where = `${TAL_BASE} AND a.accttype = '${kind}'`;
+  const label = kind === 'AcctRec' ? 'AR' : 'AP';
   return {
     id,
     title,
@@ -275,26 +293,30 @@ function agingReport(id: string, title: string, invType: string, otherTypes: str
     params: [],
     columns: agingColumns,
     notes: [
-      `Open ${what} as of the moment of the pull (current open items only; cannot be run as of a past date).`,
-      'Days past due use US Eastern time. No subsidiary filter. Fields amountunpaid / paymentamountunused are UNVERIFIED.',
-      'Must be reconciled to the control account before use.',
+      `Open ${what}, as of the moment of the pull (cannot be run as of a past date). All subsidiaries, book 1.`,
+      `Includes journal lines posted to ${label}, at full amount; lines with no name appear as "${noName}" (as in NetSuite's report).`,
+      `Ties to the ${label} control-account balance on every pull. Days past due use US Eastern time.`,
     ],
     sums: [{ column: 'openamount', alias: 'openamount' }],
+    ties: [{ a: 'openamount', b: 'control', message: `The aging did not tie to the ${label} control account, so nothing was returned. Contact the report owner.` }],
     build() {
       return {
-        totals: `SELECT COUNT(*) AS cnt, ROUND(SUM(${amount}), 2) AS openamount FROM transaction t WHERE ${where}`,
+        totals:
+          `SELECT COUNT(CASE WHEN ${open} <> 0 THEN 1 END) AS cnt, ROUND(SUM(${open}), 2) AS openamount, ` +
+          `ROUND(SUM(${lineAmt}), 2) AS control ${from} WHERE ${where}`,
         rows:
-          `SELECT BUILTIN.DF(t.entity) AS entityname, t.type AS trantype, t.tranid AS tranid, ` +
-          `TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, TO_CHAR(t.duedate, 'YYYY-MM-DD') AS duedate, ` +
-          `${amount} AS openamount FROM transaction t WHERE ${where} ORDER BY BUILTIN.DF(t.entity), t.duedate, t.id`,
+          `SELECT NVL(NVL(BUILTIN.DF(tl.entity), BUILTIN.DF(t.entity)), '${noName}') AS entityname, t.type AS trantype, ` +
+          `t.tranid AS tranid, TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, TO_CHAR(t.duedate, 'YYYY-MM-DD') AS duedate, ` +
+          `${open} AS openamount ${from} WHERE ${where} AND ${open} <> 0 ` +
+          `ORDER BY t.trandate, t.id, tal.transactionline, tal.account`,
       };
     },
     derive: deriveAging,
   };
 }
 
-const arAging = agingReport('ar_aging', 'AR Aging', 'CustInvc', ['CustCred', 'CustPymt'], 'invoices, credit memos and unapplied payments');
-const apAging = agingReport('ap_aging', 'AP Aging', 'VendBill', ['VendCred', 'VendPymt'], 'bills, vendor credits and unapplied payments');
+const arAging = agingReport('ar_aging', 'AR Aging', 'AcctRec', 'CustInvc', ['CustCred', 'CustPymt'], '- No Customer -', 'receivables');
+const apAging = agingReport('ap_aging', 'AP Aging', 'AcctPay', 'VendBill', ['VendCred', 'VendPymt'], '- No Vendor -', 'payables');
 
 const REPORTS: ReportDef[] = [trialBalance, journalEntries, glDetail, arAging, apAging];
 const BY_ID = new Map(REPORTS.map((r) => [r.id, r]));

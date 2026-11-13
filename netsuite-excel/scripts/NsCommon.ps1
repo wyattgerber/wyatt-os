@@ -114,6 +114,19 @@ function Get-JournalFilter {
     return $extra
 }
 
+function Get-AgingSql([ValidateSet('AR', 'AP')][string]$Kind) {
+    if ($Kind -eq 'AR') { $kindName = 'AcctRec'; $docType = 'CustInvc'; $credits = "'CustCred', 'CustPymt'"; $noName = '- No Customer -'; $lineAmt = '(NVL(tal.debit, 0) - NVL(tal.credit, 0))' }
+    else { $kindName = 'AcctPay'; $docType = 'VendBill'; $credits = "'VendCred', 'VendPymt'"; $noName = '- No Vendor -'; $lineAmt = '(NVL(tal.credit, 0) - NVL(tal.debit, 0))' }
+    # BEGIN-SQL aging
+    $open = "(CASE WHEN t.type = '$docType' THEN NVL(tl.foreignamountunpaid, 0) WHEN t.type IN ($credits) THEN 0 - NVL(t.foreignpaymentamountunused, 0) ELSE $lineAmt END)"
+    $from = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction INNER JOIN account a ON a.id = tal.account LEFT JOIN transactionline tl ON tl.transaction = tal.transaction AND tl.id = tal.transactionline'
+    $where = "tal.posting = 'T' AND tal.accountingbook = 1 AND a.accttype = '$kindName'"
+    $totalsSql = "SELECT COUNT(CASE WHEN $open <> 0 THEN 1 END) AS cnt, ROUND(SUM($open), 2) AS openamount, ROUND(SUM($lineAmt), 2) AS control $from WHERE $where"
+    $rowsSql = "SELECT NVL(NVL(BUILTIN.DF(tl.entity), BUILTIN.DF(t.entity)), '$noName') AS entityname, t.type AS trantype, t.tranid AS tranid, TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, TO_CHAR(t.duedate, 'YYYY-MM-DD') AS duedate, $open AS openamount $from WHERE $where AND $open <> 0 ORDER BY t.trandate, t.id, tal.transactionline, tal.account"
+    # END-SQL aging
+    return [pscustomobject]@{ Totals = $totalsSql; Rows = $rowsSql; NoName = $noName }
+}
+
 function Get-TbSql([string]$Period) {
     # BEGIN-SQL tb
     $per = "(SELECT p.pstart AS pstart, p.pend AS pend, (SELECT MAX(y.startdate) FROM accountingperiod y WHERE y.isyear = 'T' AND y.startdate <= p.pstart) AS fystart " +

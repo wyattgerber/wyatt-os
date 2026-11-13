@@ -107,7 +107,8 @@ export class MockProvider implements QueryProvider {
   private totals(q: BuiltQuery, rows: Record<string, unknown>[]): Record<string, unknown> {
     const col = (k: string) => sumOf(rows.map((r) => parseMoney(r[k])));
     if (q.report === 'ar_aging' || q.report === 'ap_aging') {
-      return { cnt: String(rows.length), openamount: this.moneyStr(col('openamount')) };
+      const open = this.moneyStr(col('openamount'));
+      return { cnt: String(rows.length), openamount: open, control: open };
     }
     return { cnt: String(rows.length), debits: this.moneyStr(col('debit')), credits: this.moneyStr(col('credit')) };
   }

@@ -18,6 +18,7 @@ export interface RunOptions {
 interface Totals {
   count: number;
   sums: Map<string, bigint>;
+  row: Record<string, unknown>;
 }
 
 async function fetchTotals(def: ReportDef, params: Record<string, string>, provider: QueryProvider): Promise<Totals> {
@@ -29,7 +30,12 @@ async function fetchTotals(def: ReportDef, params: Record<string, string>, provi
   if (!Number.isSafeInteger(count) || count < 0) throw new ApiError(502, 'NS_TOTALS', 'NetSuite returned an unexpected row count.');
   const sums = new Map<string, bigint>();
   for (const s of def.sums) sums.set(s.column, parseMoney(row[s.alias]));
-  return { count, sums };
+  for (const t of def.ties ?? []) {
+    if (parseMoney(row[t.a]) !== parseMoney(row[t.b])) {
+      throw new ApiError(502, 'RECONCILIATION_FAILED', t.message, `${t.a}=${String(row[t.a])} ${t.b}=${String(row[t.b])}`);
+    }
+  }
+  return { count, sums, row };
 }
 
 /** Run tasks with at most `n` in flight; results keep input order; first failure rejects. */
