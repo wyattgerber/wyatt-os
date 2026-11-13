@@ -2,7 +2,7 @@
 
 Under 10 accounting users click **NetSuite** on the Excel ribbon, pick a report and parameters, and get a formatted table on a new sheet. v1: Trial Balance, Journal Entries, GL Detail, AR Aging, AP Aging. No write-back.
 
-> **STATUS: rebuilt from the written spec** (the original bundle was lost). Treat everything as new, **unvalidated** code. API tests pass against mock data only; nothing has run against NetSuite, in real Excel, or via the PowerShell scripts yet.
+> **STATUS (2026-11-13):** rebuilt from the written spec (the original bundle was lost). **All five reports' SQL is validated against the NetSuite sandbox** via the PowerShell check scripts (see results below). Not yet run: the API end to end (needs Node on a PC), the add-in in real Excel (needs IT's SWA), and anything against production NetSuite.
 
 ```
 Excel task pane (addin/, Office.js + TS, webpack, XML manifest)
