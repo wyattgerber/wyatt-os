@@ -42,7 +42,8 @@ function Get-OpField([string]$Field) {
 
 function ConvertTo-Dec($v) {
     if ($null -eq $v -or "$v" -eq '') { return [decimal]0 }
-    return [decimal]::Parse([string]::Format($inv, '{0}', $v), $inv)
+    # NetSuite can return numbers in scientific notation (e.g. 3.572068025E7), so allow exponents.
+    return [decimal]::Parse([string]::Format($inv, '{0}', $v), [System.Globalization.NumberStyles]::Float, $inv)
 }
 
 $results = [System.Collections.Generic.List[object]]::new()

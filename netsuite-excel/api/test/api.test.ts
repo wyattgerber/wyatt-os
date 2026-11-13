@@ -22,6 +22,12 @@ test('money: exact BigInt parse/format, no float drift, fails closed', () => {
   assert.equal(formatMoney(parseMoney('1.1234')), '1.1234');
   assert.throws(() => parseMoney('1.1234567')); // >6 decimals
   assert.throws(() => parseMoney('12abc'));
+  // NetSuite has returned scientific notation; it must parse exactly, and still fail closed on lost precision.
+  assert.equal(formatMoney(parseMoney('3.572068025E7')), '35720680.25');
+  assert.equal(formatMoney(parseMoney('4.221607343e+7')), '42216073.43');
+  assert.equal(formatMoney(parseMoney(1e21)), '1000000000000000000000.00');
+  assert.equal(formatMoney(parseMoney('-1.5E2')), '-150.00');
+  assert.throws(() => parseMoney('1E-7'));
 });
 
 test('params: unknown, malformed and injected values are rejected', () => {
