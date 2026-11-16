@@ -457,6 +457,7 @@ test('drill-down: every detail sheet adds up exactly to its formula cell', async
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(sumRows(r.body), values[i].value, `detail of case ${i} must equal the cell`);
     assert.match(r.body.info.notes[0], /Ties to the cell: YES/);
+    assert.equal(r.body.info.balanced, null, 'no "Balanced: NO" on a drill-down');
     const ti = r.body.columns.findIndex((c) => c.key === 'trantype');
     assert.equal(r.body.rows[0][ti] === 'Opening balance', cases[i].fn === 'balance', 'BALANCE detail starts with one opening line; ACTIVITY has none');
   }
@@ -471,4 +472,11 @@ test('drill-down: bad requests are rejected; SQL only takes digit IDs', async ()
   assert.match(q.rows, /tal\.account IN \(12, 13\)/);
   assert.match(q.totals, /tl\.location = 4/);
   assert.doesNotMatch(q.rows.slice(q.rows.indexOf('ORDER BY')), /SELECT/);
+});
+
+test('Pull Info: GL Detail filtered to one account shows no Balanced line; unfiltered still checks it', async () => {
+  const one = await runReport(getReport('gl_detail'), { ...OCT, account: '1000' }, new MockProvider(), { maxRows: 20000, user: 'x', mock: true });
+  const all = await runReport(getReport('gl_detail'), OCT, new MockProvider(), { maxRows: 20000, user: 'x', mock: true });
+  assert.equal(one.info.balanced, null);
+  assert.equal(all.info.balanced, true);
 });

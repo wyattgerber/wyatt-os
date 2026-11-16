@@ -323,6 +323,7 @@ export async function buildDetail(rawRequest, deps) {
     notes: [],
     sums: [{ column: 'debit', alias: 'debits' }, { column: 'credit', alias: 'credits' }],
     build: () => sql,
+    balances: () => false, // a drill-down is one account/range: it is not supposed to balance
     // What the (mock) provider needs to answer; the real NetSuite client only uses the SQL.
     queryParams: { window: JSON.stringify(window), accounts: accountIds.join(','), filters: JSON.stringify(ids) },
   };

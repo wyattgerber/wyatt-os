@@ -120,7 +120,8 @@ export async function runReport(
     rowCount: rows.length,
     debits: debits === undefined ? null : formatMoney(debits),
     credits: credits === undefined ? null : formatMoney(credits),
-    balanced: debits === undefined || credits === undefined ? null : debits === credits,
+    // Only where balancing is expected: a single account (or a drill-down) is not supposed to balance.
+    balanced: debits === undefined || credits === undefined || (def.balances && !def.balances(params)) ? null : debits === credits,
     reconciliation: 'PASS',
     validated: def.validated,
     notes: [...(def.validated ? [] : ['UNVALIDATED REPORT: not yet reconciled to NetSuite reports.']), ...def.notes],
