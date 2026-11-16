@@ -12,6 +12,8 @@ function ConvertTo-Base64Url([byte[]]$Bytes) { [Convert]::ToBase64String($Bytes)
 function Get-Prop($o, [string]$n) { if ($null -eq $o) { return $null }; $p = $o.PSObject.Properties[$n]; if ($p) { return $p.Value } else { return $null } }
 
 # An empty JSON array comes back from a function as `$null, and @(`$null) has Count 1. Use this to get a real list.
+# Assign it ($x = Get-Items ...) or wrap it in parentheses before piping: (Get-Items ...) | ForEach-Object { ... }.
+# Piping it directly passes the whole list as ONE item.
 function Get-Items($body) { return , @(@(Get-Prop $body 'items') | Where-Object { $null -ne $_ }) }
 
 # Exact decimal parse; NetSuite may send scientific notation (e.g. 4.221607343E7).

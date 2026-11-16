@@ -34,7 +34,7 @@ try {
         $ids = Invoke-SuiteQL $conn ("SELECT DISTINCT tal.transaction AS txn FROM transactionaccountingline tal INNER JOIN account a ON a.id = tal.account " +
             "WHERE a.acctnumber = '$Account' AND tal.posting = 'T' AND tal.accountingbook = 1") 50
         if ($ids.Status -ne 200) { throw "Finding transactions for account $Account failed (HTTP $($ids.Status)): $(Format-NsError $ids)" }
-        $idList = @(Get-Items $ids.Body | ForEach-Object { Get-Prop $_ 'txn' } | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [long]$_ })
+        $idList = @((Get-Items $ids.Body) | ForEach-Object { Get-Prop $_ 'txn' } | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [long]$_ })
         Write-Host "Transaction IDs found for ${Account}: $($idList -join ', ')"
         if ($idList.Count -eq 0) { Write-Host "Raw answer: $((Get-Items $ids.Body) | ConvertTo-Json -Compress -Depth 3)" }
         if ($idList.Count -eq 0) { throw "No posting transactions found for account $Account." }
@@ -89,7 +89,7 @@ try {
         if ($u.Status -ne 200) { Write-Host "[FAIL] $f -> HTTP $($u.Status): $(Format-NsError $u)" -ForegroundColor Red; continue }
         $x = (Get-Items $u.Body)[0]
         $s = Invoke-SuiteQL $conn "SELECT BUILTIN.DF(tl.$f) AS label, COUNT(*) AS n FROM transactionline tl WHERE tl.$f IS NOT NULL GROUP BY BUILTIN.DF(tl.$f) ORDER BY COUNT(*) DESC" 5
-        $labels = if ($s.Status -eq 200) { (@(Get-Items $s.Body) | ForEach-Object { Get-Prop $_ 'label' }) -join ' | ' } else { "(names unavailable: HTTP $($s.Status))" }
+        $labels = if ($s.Status -eq 200) { ((Get-Items $s.Body) | ForEach-Object { Get-Prop $_ 'label' }) -join ' | ' } else { "(names unavailable: HTTP $($s.Status))" }
         Write-Host ("{0,-28} posting lines with a value: {1,7}   distinct values: {2,5}   e.g. {3}" -f $f, (Get-Prop $x 'used'), (Get-Prop $x 'distinct_values'), $labels)
     }
 }
