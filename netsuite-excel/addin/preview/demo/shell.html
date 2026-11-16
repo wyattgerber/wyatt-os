@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Excel (simulated) - NetSuite add-in demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px "Segoe UI", system-ui, sans-serif; background: #f3f2f1; color: #201f1e; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  .title { background: #217346; color: #fff; padding: 6px 12px; font-size: 13px; display: flex; justify-content: space-between; }
+  .tabs { background: #217346; display: flex; gap: 2px; padding: 0 8px; }
+  .tabs span { color: #e8f3ec; padding: 5px 12px; font-size: 12px; }
+  .tabs span.on { background: #f3f2f1; color: #217346; border-radius: 4px 4px 0 0; font-weight: 600; }
+  .ribbon { background: #f3f2f1; border-bottom: 1px solid #d2d0ce; height: 74px; display: flex; align-items: stretch; padding: 4px 10px; gap: 14px; }
+  .grp { display: flex; flex-direction: column; justify-content: space-between; align-items: center; color: #605e5c; font-size: 11px; padding: 0 10px; border-right: 1px solid #e1dfdd; }
+  .btn { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 8px; border-radius: 3px; font-size: 12px; color: #201f1e; border: 1px solid transparent; }
+  .btn img { width: 32px; height: 32px; }
+  .btn.hot { background: #c7e0d0; border-color: #217346; }
+  .fake { width: 32px; height: 32px; background: #e1dfdd; border-radius: 3px; }
+  .fbar { display: flex; align-items: center; gap: 8px; background: #fff; border-bottom: 1px solid #d2d0ce; padding: 3px 8px; height: 28px; }
+  .namebox { width: 80px; border: 1px solid #c8c6c4; padding: 2px 6px; font-size: 12px; }
+  .fx { color: #605e5c; font-style: italic; }
+  #formula { flex: 1; font: 13px Consolas, monospace; }
+  .main { flex: 1; display: flex; min-height: 0; }
+  .gridwrap { flex: 1; overflow: hidden; background: #fff; position: relative; }
+  table { border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #e1dfdd; height: 22px; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+  th { background: #f3f2f1; color: #605e5c; font-weight: 400; text-align: center; }
+  td.rn { background: #f3f2f1; color: #605e5c; text-align: center; width: 34px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.sel { outline: 2px solid #217346; outline-offset: -2px; }
+  td.busy { color: #8a8886; font-style: italic; }
+  td.b { font-weight: 700; }
+  td.hdr { background: #dce6f1; font-weight: 700; }
+  td.band { background: #f2f7fc; }
+  td.err { color: #a4262c; }
+  .pane { width: 0; transition: width .5s ease; border-left: 1px solid #d2d0ce; background: #faf9f8; display: flex; flex-direction: column; overflow: hidden; }
+  .pane.open { width: 360px; }
+  .panehead { display: flex; justify-content: space-between; padding: 6px 10px; font-weight: 600; border-bottom: 1px solid #e1dfdd; white-space: nowrap; }
+  .pane iframe { flex: 1; border: 0; width: 360px; }
+  .sheets { display: flex; gap: 0; background: #f3f2f1; border-top: 1px solid #d2d0ce; padding: 0 8px; height: 28px; align-items: stretch; }
+  .sheets span { padding: 5px 14px; font-size: 12px; color: #605e5c; border-right: 1px solid #e1dfdd; }
+  .sheets span.on { background: #fff; color: #217346; font-weight: 600; border-bottom: 2px solid #217346; }
+  .caption { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); background: rgba(32,31,30,.88); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 16px; max-width: 760px; text-align: center; transition: opacity .3s; z-index: 5; }
+  .wm { position: absolute; right: 10px; top: 6px; background: #fff4ce; color: #605e5c; border: 1px solid #f2c94c; padding: 3px 8px; font-size: 11px; border-radius: 4px; z-index: 4; }
+</style>
+</head>
+<body>
+  <div class="title"><span>Book1 - Excel</span><span>Simulated Excel window · real add-in code · MOCK data</span></div>
+  <div class="tabs"><span>File</span><span class="on">Home</span><span>Insert</span><span>Formulas</span><span>Data</span><span>Review</span><span>View</span></div>
+  <div class="ribbon">
+    <div class="grp"><div style="display:flex;gap:6px"><div class="btn"><div class="fake"></div>Paste</div></div><span>Clipboard</span></div>
+    <div class="grp"><div style="display:flex;gap:6px"><div class="btn"><div class="fake"></div>Font</div><div class="btn"><div class="fake"></div>Align</div></div><span>Font</span></div>
+    <div class="grp"><div style="display:flex;gap:6px"><div class="btn" id="nsbtn"><img src="/assets/icon-32.png" alt="">NetSuite</div></div><span>NetSuite</span></div>
+  </div>
+  <div class="fbar"><span class="namebox" id="namebox">A1</span><span class="fx">fx</span><span id="formula"></span></div>
+  <div class="main">
+    <div class="gridwrap"><div class="wm">Simulation for illustration: the task pane and the numbers come from the real add-in and API in mock mode</div><table id="grid"></table><div class="caption" id="caption" style="opacity:0"></div></div>
+    <div class="pane" id="pane"><div class="panehead"><span>NetSuite Reports</span><span>✕</span></div><iframe id="tp" src="about:blank" title="task pane"></iframe></div>
+  </div>
+  <div class="sheets" id="sheets"></div>
+<script>
+// ---- a tiny spreadsheet that the recording script drives ----
+const COLS = 'ABCDEFGHIJKLMN'.split('');
+const WIDTHS = { A: 230, B: 130, C: 130, D: 130, E: 110, F: 110, G: 110, H: 110, I: 110, J: 110, K: 110, L: 40, M: 150, N: 220 };
+const book = { Sheet1: { cells: {}, formulas: {}, fmt: {}, style: {} } };
+let current = 'Sheet1';
+let sel = 'A1';
+const toKey = (a) => { const m = /^([A-Z])(\d+)$/.exec(a); return { c: COLS.indexOf(m[1]), r: Number(m[2]) - 1 }; };
+const money = (v) => { const s = Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); return v < 0 ? `(${s})` : s; };
+function render() {
+  const sh = book[current];
+  const g = document.getElementById('grid');
+  let h = '<tr><th style="width:34px"></th>' + COLS.map((c) => `<th style="width:${WIDTHS[c]}px">${c}</th>`).join('') + '</tr>';
+  for (let r = 0; r < 26; r++) {
+    h += `<tr><td class="rn">${r + 1}</td>`;
+    for (let c = 0; c < COLS.length; c++) {
+      const a = COLS[c] + (r + 1);
+      let v = sh.cells[a]; const st = sh.style[a] || '';
+      let cls = st;
+      if (typeof v === 'number') { if (!st.includes('left')) cls += ' num'; v = sh.fmt[a] === 'date' ? new Date(Date.UTC(1899, 11, 30) + v * 86400000).toISOString().slice(0, 10) : sh.fmt[a] === 'int' ? String(v) : money(v); }
+      if (current === 'Sheet1' && a === sel) cls += ' sel';
+      h += `<td class="${cls}">${v === undefined ? '' : String(v).replace(/</g, '&lt;')}</td>`;
+    }
+    h += '</tr>';
+  }
+  g.innerHTML = h;
+  const tabs = Object.keys(book);
+  document.getElementById('sheets').innerHTML = tabs.map((t) => `<span class="${t === current ? 'on' : ''}">${t}</span>`).join('');
+  document.getElementById('namebox').textContent = current === 'Sheet1' ? sel : 'A1';
+  document.getElementById('formula').textContent = current === 'Sheet1' ? (sh.formulas[sel] || (sh.cells[sel] ?? '')) : '';
+}
+window.demo = {
+  render,
+  set(a, v, style) { book.Sheet1.cells[a] = v; if (style) book.Sheet1.style[a] = style; render(); },
+  select(a) { sel = a; current = 'Sheet1'; render(); },
+  async type(a, text) { sel = a; current = 'Sheet1'; const f = document.getElementById('formula'); render(); for (let i = 1; i <= text.length; i++) { f.textContent = text.slice(0, i); await new Promise((r) => setTimeout(r, 28)); } },
+  commitFormula(a, text) { book.Sheet1.formulas[a] = text; book.Sheet1.cells[a] = '#BUSY!'; book.Sheet1.style[a] = 'busy num'; render(); },
+  result(a, v) { book.Sheet1.cells[a] = v; book.Sheet1.style[a] = (book.Sheet1.style[a] || '').replace('busy', '').trim(); render(); },
+  error(a, code) { book.Sheet1.cells[a] = code; book.Sheet1.style[a] = 'err num'; render(); },
+  caption(t) { const c = document.getElementById('caption'); c.textContent = t; c.style.opacity = t ? 1 : 0; },
+  openPane() { document.getElementById('nsbtn').classList.add('hot'); document.getElementById('pane').classList.add('open'); document.getElementById('tp').src = '/taskpane.html'; },
+  /** Copy a sheet the add-in wrote (in the task pane's Excel stand-in) into the visible workbook and show it. */
+  showAddinSheet(name) {
+    const fw = document.getElementById('tp').contentWindow;
+    const s = fw.__sheets.find((x) => x.name === name);
+    const cells = {}, fmt = {}, style = {};
+    // Pull Info sits right of the table (its column depends on the report): keep its values left-aligned.
+    const infoKey = Object.keys(s.cells).find((k) => s.cells[k] === 'NetSuite pull');
+    const infoCol = infoKey ? Number(infoKey.split(',')[1]) : -1;
+    for (const [k, v] of Object.entries(s.cells)) {
+      const [r, c] = k.split(',').map(Number);
+      if (c >= COLS.length || r >= 26) continue;
+      const a = COLS[c] + (r + 1);
+      cells[a] = v;
+      const f = s.formats[k];
+      fmt[a] = f === 'yyyy-mm-dd' ? 'date' : f === '0' ? 'int' : '';
+      const inTable = infoCol < 0 || c < infoCol - 1;
+      style[a] = (r === 0 && inTable ? 'hdr' : r > 0 && r % 2 === 0 && inTable ? 'band' : '') + (s.bold[k] ? ' b' : '') + (c === infoCol + 1 ? ' left' : '');
+    }
+    book[name] = { cells, formulas: {}, fmt, style };
+    current = name; render();
+  },
+  showSheet(name) { current = name; render(); },
+};
+// Sheet1 starting layout, built from the demo scenario (record.js calls demo.layout).
+window.demo.layout = (sc) => {
+  const s = book.Sheet1;
+  s.cells = { A1: sc.title }; s.style = { A1: 'b' }; s.formulas = {};
+  sc.columns.forEach((c, i) => { const a = `${'BCDEFG'[i]}2`; s.cells[a] = c.label; s.style[a] = 'b num'; });
+  sc.rows.forEach((r, i) => { s.cells[`A${i + 3}`] = r.label; });
+  const net = 3 + sc.rows.length;
+  s.cells[`A${net}`] = sc.netLabel || 'Net'; s.style[`A${net}`] = 'b';
+  sc.balances.forEach((b, i) => { s.cells[`A${net + 2 + i}`] = b.label; });
+  render();
+};
+render();
+</script>
+</body>
+</html>
