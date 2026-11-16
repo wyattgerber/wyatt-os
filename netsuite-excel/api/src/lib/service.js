@@ -7,6 +7,7 @@ import { ApiError, toErrorBody } from './errors.js';
 import { MockProvider } from './mock.js';
 import { NetSuiteClient } from './netsuite.js';
 import { runReport } from './runReport.js';
+import { evaluateBatch, FILTERS, MAX_REQUESTS } from './formulas.js';
 
 const MAX_BODY_BYTES = 4096;
 let cachedClient;
@@ -51,6 +52,53 @@ export async function periodsService(principalHeader, deps = {}) {
     const provider = deps.provider ?? providerFor(cfg, deps.log ?? (() => {}));
     return { status: 200, body: { periods: await loadPeriods(provider, cfg.mock ? 'mock' : 'netsuite') } };
   } catch (e) {
+    return toErrorBody(e);
+  }
+}
+
+const MAX_FORMULA_BODY_BYTES = 256 * 1024;
+const LOOKUP_CACHE_MS = 10 * 60 * 1000;
+const lookupCache = new Map(); // `${source}|${filterKey}` -> { at, list }
+
+/** [{id, name}] for a filter's list table (subsidiaries, profit centers, ...), cached 10 minutes. */
+async function loadLookup(provider, source, filterKey) {
+  const ck = `${source}|${filterKey}`;
+  const hit = lookupCache.get(ck);
+  if (hit && Date.now() - hit.at < LOOKUP_CACHE_MS) return hit.list;
+  const table = FILTERS[filterKey].table; // fixed table names only, never user input
+  const res = await provider.query({ report: 'lookup', kind: 'rows', params: { table }, sql: `SELECT id, name FROM ${table} ORDER BY id` }, 0, 1000);
+  const list = res.items.map((r) => ({ id: String(r.id), name: String(r.name ?? '') }));
+  lookupCache.set(ck, { at: Date.now(), list });
+  return list;
+}
+
+/** POST /api/balances  { requests: [...] }  ->  { results: [{ value } | { error }] }  (see formulas.js) */
+export async function formulasService(principalHeader, rawBody, deps = {}) {
+  const log = deps.log ?? (() => {});
+  const started = Date.now();
+  let user = 'unknown';
+  let n = 0;
+  try {
+    const cfg = loadConfig(deps.env);
+    user = requireAllowed(principalHeader, cfg.allowedUsers).email;
+    if (Buffer.byteLength(rawBody, 'utf8') > MAX_FORMULA_BODY_BYTES) throw new ApiError(413, 'BODY_TOO_LARGE', 'Too many formulas in one request.');
+    let body;
+    try { body = JSON.parse(rawBody); } catch { throw new ApiError(400, 'BAD_JSON', 'The request was not in the expected format.'); }
+    if (!body || typeof body !== 'object' || !Array.isArray(body.requests) || Object.keys(body).some((k) => k !== 'requests')) {
+      throw new ApiError(400, 'BAD_JSON', 'The request was not in the expected format.');
+    }
+    n = body.requests.length;
+    if (n > MAX_REQUESTS) throw new ApiError(413, 'TOO_MANY_FORMULAS', `At most ${MAX_REQUESTS} formulas per request.`);
+    const provider = deps.provider ?? providerFor(cfg, log);
+    const source = cfg.mock ? 'mock' : 'netsuite';
+    const periods = await loadPeriods(provider, source);
+    const out = await evaluateBatch(body.requests, { periods, provider, log, loadLookup: (k) => loadLookup(provider, source, k) });
+    const errors = out.results.filter((r) => r.error).length;
+    log(`AUDIT ${JSON.stringify({ user, report: 'formulas', requests: n, groups: out.groups, errors, status: 'ok', ms: Date.now() - started })}`);
+    return { status: 200, body: { results: out.results, mock: cfg.mock } };
+  } catch (e) {
+    const detail = e instanceof ApiError ? `${e.code}${e.detail ? ': ' + e.detail : ''}` : String(e);
+    log(`AUDIT ${JSON.stringify({ user, report: 'formulas', requests: n, status: 'error', error: detail.slice(0, 500), ms: Date.now() - started })}`);
     return toErrorBody(e);
   }
 }

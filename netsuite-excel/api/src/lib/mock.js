@@ -134,6 +134,26 @@ export class MockProvider {
           entityname, trantype, tranid, trandate, duedate, openamount: amt.toFixed(2),
         }));
       }
+      case 'formula': {
+        // Mock only: per-account sums by date window and subsidiary. No fiscal-year / retained-earnings logic
+        // (the real SQL does that, validated against NetSuite).
+        const f = JSON.parse(p.filters || '{}');
+        const inWindow = (l) =>
+          p.basis === 'period' ? l.trandate <= mockPeriodEnd(p.period)
+            : p.basis === 'date' ? l.trandate <= p.date
+              : l.trandate >= mockPeriodStart(p.from) && l.trandate <= mockPeriodEnd(p.to);
+        const bySub = (l) => !f.subsidiary || l.subsidiary === `Mock Sub ${f.subsidiary}`;
+        const acc = new Map();
+        for (const l of LINES.filter((x) => inWindow(x) && bySub(x))) {
+          const e = acc.get(l.acctnumber) ?? { d: 0n, c: 0n };
+          e.d += l.debit;
+          e.c += l.credit;
+          acc.set(l.acctnumber, e);
+        }
+        return [...acc.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([n, e]) => ({ acctnumber: n, debit: m(e.d), credit: m(e.c) }));
+      }
+      case 'lookup':
+        return p.table === 'subsidiary' ? [1, 2, 3].map((i) => ({ id: String(i), name: `Mock Sub ${i}` })) : [];
       case 'periods': {
         const out = [];
         for (let y = 2025; y <= 2027; y++) {

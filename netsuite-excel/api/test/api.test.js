@@ -7,7 +7,8 @@ import { formatMoney, parseMoney } from '../src/lib/money.js';
 import { principalFromHeader } from '../src/lib/auth.js';
 import { MockProvider } from '../src/lib/mock.js';
 import { runReport } from '../src/lib/runReport.js';
-import { meService, periodsService, reportsService, runService } from '../src/lib/service.js';
+import { formulasService, meService, periodsService, reportsService, runService } from '../src/lib/service.js';
+import { activitySql, balanceDateSql, balancePeriodSql, compareAcct } from '../src/lib/formulas.js';
 import { buildClientAssertion, NetSuiteClient } from '../src/lib/netsuite.js';
 
 const principal = (email) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
@@ -331,4 +332,106 @@ test('network failure reaching NetSuite: friendly message, real cause kept for t
     (e) => e.code === 'NS_UNREACHABLE' && /UNABLE_TO_GET_ISSUER_CERT_LOCALLY/.test(e.detail) && !/certificate/.test(e.message),
   );
   assert.match(logs.join(' '), /unable to get local issuer certificate/);
+});
+
+// ---------------- F9-style formulas ----------------
+
+const formulas = async (requests, deps = {}) => {
+  const r = await formulasService(principal('ann@example.com'), JSON.stringify({ requests }), { env: ENV, ...deps });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.body.results;
+};
+
+test('formulas: BALANCE by period equals the Trial Balance; ACTIVITY equals GL Detail; whole ledger nets to zero', async () => {
+  const tb = await runReport(getReport('trial_balance'), { period: 'Oct 2026' }, new MockProvider(), { maxRows: 20000, user: 'x', mock: true });
+  const ai = tb.columns.findIndex((c) => c.key === 'acctnumber');
+  const bi = tb.columns.findIndex((c) => c.key === 'balance');
+  const tbBal = Object.fromEntries(tb.rows.map((r) => [r[ai], r[bi]]));
+  const gl = await runReport(getReport('gl_detail'), OCT, new MockProvider(), { maxRows: 20000, user: 'x', mock: true });
+  const [ga, gd, gc] = ['acctnumber', 'debit', 'credit'].map((k) => gl.columns.findIndex((c) => c.key === k));
+  const glNet = (acct) => formatMoney(gl.rows.filter((r) => r[ga] === acct).reduce((s, r) => s + parseMoney(r[gd]) - parseMoney(r[gc]), 0n));
+
+  const res = await formulas([
+    { fn: 'balance', account: '2000', period: 'Oct 2026' },
+    { fn: 'balance', account: '5000', period: 'Oct 2026' },
+    { fn: 'activity', account: '1000', from: 'Oct 2026', to: 'Oct 2026' },
+    { fn: 'balance', account: '0:99999', period: 'Oct 2026' },
+    { fn: 'balance', account: '4000:5100', period: 'Oct 2026' },
+  ]);
+  assert.equal(res[0].value, tbBal['2000']);
+  assert.equal(res[1].value, tbBal['5000']);
+  assert.equal(res[2].value, glNet('1000'));
+  assert.equal(res[3].value, '0.00', 'every account together nets to zero');
+  assert.equal(res[4].value, formatMoney(['4000', '5000', '5100'].reduce((s, a) => s + parseMoney(tbBal[a] ?? '0'), 0n)), 'range sums its accounts');
+});
+
+test('formulas: balance at a month-end date equals the period balance (no out-of-period lines in the mock)', async () => {
+  const res = await formulas([
+    { fn: 'balance', account: '2000', period: 'Oct 2026' },
+    { fn: 'balance', account: '2000', date: '2026-10-31' },
+  ]);
+  assert.equal(res[0].value, res[1].value);
+});
+
+test('formulas: one query group per (function, period, filters); 200 cells on one period cost one group', async () => {
+  let queries = 0;
+  const counting = { inner: new MockProvider(), async query(q, o, l) { if (q.report === 'formula') queries++; return this.inner.query(q, o, l); } };
+  const reqs = Array.from({ length: 200 }, (_, i) => ({ fn: 'balance', account: ['1000', '1200', '2000', '4000', '5000'][i % 5], period: 'Oct 2026' }));
+  const res = await formulas(reqs, { provider: counting });
+  assert.ok(res.every((r) => r.value !== undefined));
+  assert.equal(queries, 2, 'one totals + one rows query for the whole batch');
+});
+
+test('formulas: names resolve to IDs (only digits reach SQL); bad cells get their own error, others still answer', async () => {
+  const res = await formulas([
+    { fn: 'balance', account: '2000', period: 'Oct 2026', filters: { subsidiary: 'Mock Sub 1' } },
+    { fn: 'balance', account: '2000', period: 'Oct 2026', filters: { subsidiary: '1' } },
+    { fn: 'balance', account: '2000', period: 'Oct 2026', filters: { subsidiary: "x' OR '1'='1" } },
+    { fn: 'balance', account: '2000', period: 'Okt 2026' },
+    { fn: 'balance', account: '20 00', period: 'Oct 2026' },
+    { fn: 'activity', account: '1000', from: 'Oct 2026', to: 'Sep 2026' },
+    { fn: 'balance', account: '2000', period: 'Oct 2026', filters: { colour: 'red' } },
+    { fn: 'balance', account: '2000', period: 'Oct 2026' },
+  ]);
+  assert.equal(res[0].value, res[1].value, 'name and ID give the same answer');
+  assert.notEqual(res[0].value, res[7].value, 'a subsidiary filter changes the answer');
+  assert.match(res[2].error, /No Subsidiary named/);
+  assert.match(res[3].error, /not an accounting period/);
+  assert.match(res[4].error, /not valid/);
+  assert.match(res[5].error, /must not be after/);
+  assert.match(res[6].error, /Unknown filter/);
+  assert.ok(res[7].value !== undefined, 'a good cell in a batch with bad ones still answers');
+});
+
+test('formulas: a group that fails reconciliation errors only its own cells', async () => {
+  const broken = { inner: new MockProvider(), async query(q, o, l) {
+    const r = await this.inner.query(q, o, l);
+    if (q.report === 'formula' && q.kind === 'totals' && q.params.period === 'Sep 2026') r.items[0] = { ...r.items[0], debits: '1.00' };
+    return r;
+  } };
+  const res = await formulas([
+    { fn: 'balance', account: '2000', period: 'Sep 2026' },
+    { fn: 'balance', account: '2000', period: 'Oct 2026' },
+  ], { provider: broken });
+  assert.match(res[0].error, /did not reconcile/);
+  assert.ok(res[1].value !== undefined);
+});
+
+test('formulas: SQL safety and shape (filters are digits, no subqueries in GROUP BY/ORDER BY)', () => {
+  for (const sql of [balancePeriodSql('Oct 2026', { subsidiary: '5', profitCenter: '12' }), balanceDateSql('2026-10-31', { mode: '3' }), activitySql('Sep 2026', 'Oct 2026', {})]) {
+    for (const q of [sql.totals, sql.rows]) assert.doesNotMatch(q, /;|--/);
+    assert.doesNotMatch(sql.rows.slice(sql.rows.indexOf('GROUP BY')), /SELECT/);
+  }
+  assert.match(balancePeriodSql('Oct 2026', { subsidiary: '5', profitCenter: '12' }).rows, /tl\.class = 12 AND tl\.subsidiary = 5|tl\.subsidiary = 5.*tl\.class = 12/);
+  assert.match(balanceDateSql('2026-10-31', { mode: '3' }).rows, /tl\.cseg_appf_mode = 3/);
+  assert.throws(() => balancePeriodSql('Oct 2026', { subsidiary: '5 OR 1=1' }));
+  assert.equal(compareAcct('900', '1000'), -1, 'numeric account order');
+  assert.ok(compareAcct('NS10', 'NS9') > 0, 'natural order for non-numeric accounts');
+});
+
+test('formulas: request limits and allowlist', async () => {
+  assert.equal((await formulasService(principal('eve@example.com'), JSON.stringify({ requests: [] }), { env: ENV })).status, 403);
+  const tooMany = await formulasService(principal('ann@example.com'), JSON.stringify({ requests: Array.from({ length: 1001 }, () => ({})) }), { env: ENV });
+  assert.equal(tooMany.status, 413);
+  assert.equal((await formulasService(principal('ann@example.com'), JSON.stringify({ requests: [], sql: 'x' }), { env: ENV })).status, 400);
 });

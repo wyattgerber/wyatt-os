@@ -72,8 +72,8 @@ export function validateParams(def, raw) {
 
 // ---------- SQL fragments (only ever fed validated values) ----------
 
-const TAL_FROM = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction';
-const TAL_BASE = `tal.posting = 'T' AND tal.accountingbook = 1`;
+export const TAL_FROM = 'FROM transactionaccountingline tal INNER JOIN transaction t ON t.id = tal.transaction';
+export const TAL_BASE = `tal.posting = 'T' AND tal.accountingbook = 1`;
 
 const periodRangeParams = [
   { name: 'fromPeriod', label: 'From period', type: 'text', required: true },
@@ -96,7 +96,7 @@ const lineColumns = [
 
 // Line-level reports filter on POSTING PERIOD (same basis as the validated Trial Balance), From..To inclusive.
 // One-row range view: MAX(CASE..) keeps it exactly one row; an unknown period name gives NULL -> no rows (visible).
-function periodRange(from, to) {
+export function periodRange(from, to) {
   return (
     `(SELECT MAX(CASE WHEN tp.periodname = '${from}' THEN tp.startdate END) AS rstart, ` +
     `MAX(CASE WHEN tp.periodname = '${to}' THEN tp.enddate END) AS rend FROM accountingperiod tp ` +
@@ -135,9 +135,9 @@ const lineSums = [
 //  - P&L accounts: fiscal year-to-date only (periods from the fiscal-year start through the chosen period).
 //  - Prior fiscal years' P&L is rolled into the system retained-earnings account (netted with its own balance),
 //    matching NetSuite's Trial Balance report. Rows' sums still equal the totals query exactly.
-const PL_TYPES = `'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'`;
+export const PL_TYPES = `'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'`;
 
-function tbParts(period) {
+export function tbParts(period) {
   // One-row inline view with the period's start/end and its fiscal-year start. MAX() makes it exactly one row
   // (NULLs if the name matches nothing -> empty TB, visible). No subqueries in GROUP BY/ORDER BY (Oracle rejects them).
   const per =

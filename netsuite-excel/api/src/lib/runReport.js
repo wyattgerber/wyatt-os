@@ -23,7 +23,7 @@ async function fetchTotals(def, params, provider) {
 }
 
 /** Run tasks with at most `n` in flight; results keep input order; first failure rejects. */
-async function pool(n, tasks) {
+export async function pool(n, tasks) {
   const results = new Array(tasks.length);
   let next = 0;
   const worker = async () => {

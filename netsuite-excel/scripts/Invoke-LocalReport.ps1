@@ -16,8 +16,10 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('trial_balance', 'journal_entries', 'gl_detail', 'ar_aging', 'ap_aging')][string]$Report,
+    [Parameter(Mandatory)][ValidateSet('trial_balance', 'journal_entries', 'gl_detail', 'ar_aging', 'ap_aging', 'formulas')][string]$Report,
     [hashtable]$Params = @{},
+    # For -Report formulas: an array of hashtables, e.g. @(@{ fn='balance'; account='1210'; period='Oct 2026' })
+    [object[]]$Requests = @(),
     [string]$Vault = 'NetSuite',
     [string]$Item = 'Excel Addin Connection',
     [string]$User = (git config user.email),
@@ -45,7 +47,7 @@ function Get-OpField([string]$Field) {
 }
 
 if (-not $OutFile) { $OutFile = Join-Path $apiDir "out\$Report-$(Get-Date -Format 'yyyyMMdd-HHmmss').json" }
-$envNames = 'NETSUITE_ACCOUNT_ID', 'NETSUITE_CLIENT_ID', 'NETSUITE_CERTIFICATE_ID', 'NETSUITE_PRIVATE_KEY', 'ALLOWED_USERS', 'CLI_USER_EMAIL', 'CLI_OUT', 'NETSUITE_MOCK'
+$envNames = 'NETSUITE_ACCOUNT_ID', 'NETSUITE_CLIENT_ID', 'NETSUITE_CERTIFICATE_ID', 'NETSUITE_PRIVATE_KEY', 'ALLOWED_USERS', 'CLI_USER_EMAIL', 'CLI_OUT', 'CLI_REQUESTS', 'NETSUITE_MOCK'
 try {
     $env:NETSUITE_ACCOUNT_ID = Get-OpField 'account_id'
     $env:NETSUITE_CLIENT_ID = Get-OpField 'client_id'
@@ -54,6 +56,7 @@ try {
     $env:ALLOWED_USERS = $User
     $env:CLI_USER_EMAIL = $User
     $env:CLI_OUT = $OutFile
+    $env:CLI_REQUESTS = ConvertTo-Json -InputObject @($Requests) -Depth 5 -Compress
     Remove-Item Env:NETSUITE_MOCK -ErrorAction SilentlyContinue   # real NetSuite, never mock
 
     $argList = @($cli, $Report) + ($Params.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" })
