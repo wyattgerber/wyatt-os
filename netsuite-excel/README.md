@@ -77,7 +77,8 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 ## Formulas (F9-style) status
 
 - **Validated on the sandbox through the real API (2026-11-16):** `ACTIVITY(1040, Oct 2026)` = −4,952,506.82 (NetSuite GL report); `BALANCE(3400, Jan/Oct 2026)` = −45,097.19 / −17,731,472.19 (NetSuite TB); whole ledger nets to 0.00; date basis = period basis at 2026-10-31 (3400, 1210); `BALANCE(1210, Oct 2026)` = 21,127,458.51 (NetSuite GL running balance); subsidiary filter by name (NTS) works and balances.
-- **Not yet validated:** Profit Center, Department, Location filters; a second subsidiary; Mode (no Mode data in the sandbox).
+- **Profit Center filter validated (2026-11-16):** `ACTIVITY(4000, Jan 2024, profitCenter "Caterpillar")` = −643,493.61, identical to a NetSuite saved search (Posting, Jan 2024, Profit Center = Caterpillar, account 4000): one line, JE223, **credit** 643,493.61. Note: a saved search's *Amount* column shows income lines credit-positive; compare with the Debit/Credit columns, not Amount.
+- **Not yet validated:** Department, Location filters; a second subsidiary; Mode (no Mode data in the sandbox).
 - Values are debit − credit (credit balances negative). Account ranges are inclusive (numeric order when both ends are digits).
 
 ## Known problems (not done)
