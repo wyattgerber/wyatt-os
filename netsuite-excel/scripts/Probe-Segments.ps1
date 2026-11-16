@@ -15,7 +15,10 @@
 [CmdletBinding()]
 param(
     [string]$Vault = 'NetSuite',
-    [string]$Item = 'Excel Addin Connection'
+    [string]$Item = 'Excel Addin Connection',
+    # Only sample lines from transactions that post to this account (e.g. 4060, where Mode = Van exists),
+    # list the custom/segment columns those lines carry, and test the segment value-list tables.
+    [ValidatePattern('^[A-Za-z0-9._-]{1,30}$')][string]$Account
 )
 
 Set-StrictMode -Version Latest
@@ -25,6 +28,29 @@ $ErrorActionPreference = 'Stop'
 $conn = $null
 try {
     $conn = Connect-NetSuite $Vault $Item
+
+    if ($Account) {
+        $r = Invoke-SuiteQL $conn ("SELECT * FROM transactionline tl WHERE tl.transaction IN (SELECT tal.transaction FROM transactionaccountingline tal " +
+            "INNER JOIN account a ON a.id = tal.account WHERE a.acctnumber = '$Account' AND tal.posting = 'T')") 1000
+        if ($r.Status -ne 200) { throw "Sampling lines for account $Account failed (HTTP $($r.Status)): $(Format-NsError $r)" }
+        $rows = Get-Items $r.Body
+        $cols = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($row in $rows) { foreach ($n in $row.PSObject.Properties.Name) { [void]$cols.Add($n) } }
+        $interesting = @($cols | Where-Object { $_ -match '^cseg|^custcol|mode|serv' } | Sort-Object)
+        Write-Host "Lines on transactions posting to $Account sampled: $($rows.Count). Custom/segment columns seen: $($interesting -join ', ')"
+        foreach ($c in $interesting) {
+            $n = @($rows | Where-Object { $null -ne (Get-Prop $_ $c) -and "$(Get-Prop $_ $c)" -ne '' }).Count
+            $vals = @($rows | ForEach-Object { Get-Prop $_ $c } | Where-Object { $null -ne $_ -and "$_" -ne '' } | Select-Object -Unique -First 6) -join ', '
+            Write-Host ("  {0,-40} lines with a value: {1,5}   values (internal IDs): {2}" -f $c, $n, $vals)
+        }
+        Write-Host ''
+        foreach ($t in 'customrecord_cseg_appf_mode', 'customrecord_cseg_appf_serv_type') {
+            $l = Invoke-SuiteQL $conn "SELECT id, name FROM $t ORDER BY id" 20
+            if ($l.Status -eq 200) { Write-Host "[OK]   value list $t : $((Get-Items $l.Body | ForEach-Object { "$(Get-Prop $_ 'id')=$(Get-Prop $_ 'name')" }) -join '; ')" -ForegroundColor Green }
+            else { Write-Host "[FAIL] value list $t -> HTTP $($l.Status): $(Format-NsError $l)" -ForegroundColor Red }
+        }
+        return
+    }
 
     # 1) Column names across 2,000 lines (values are not printed). Empty fields are omitted per row, so union them.
     $seen = [System.Collections.Generic.HashSet[string]]::new()

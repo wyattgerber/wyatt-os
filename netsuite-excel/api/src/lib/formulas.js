@@ -8,7 +8,7 @@
 //   NS.ACTIVITY(account, fromPeriod, toPeriod, [filters])   net movement over a period range (VALIDATED GL basis).
 //
 // account: "4000" or an inclusive range "4000:4999" (numeric compare when all parts are digits).
-// filters: subsidiary, profitCenter (NetSuite Class, renamed), department, location, mode (custom segment).
+// filters: subsidiary, profitCenter (NetSuite Class, renamed), department, location, mode, serviceType (custom segments).
 //   Each value is an internal ID or a name. Names are resolved to IDs HERE; only digits ever reach the SQL.
 //
 // Requests are grouped by (function, period/date/range, filter set); each group is ONE SuiteQL query plus its
@@ -31,6 +31,7 @@ export const FILTERS = {
   department: { column: 'tl.department', table: 'department', label: 'Department' },
   location: { column: 'tl.location', table: 'location', label: 'Location' },
   mode: { column: 'tl.cseg_appf_mode', table: 'customrecord_cseg_appf_mode', label: 'Mode' },
+  serviceType: { column: 'tl.cseg_appf_serv_type', table: 'customrecord_cseg_appf_serv_type', label: 'Service Type' },
 };
 
 const TL_JOIN = ' LEFT JOIN transactionline tl ON tl.transaction = tal.transaction AND tl.id = tal.transactionline';

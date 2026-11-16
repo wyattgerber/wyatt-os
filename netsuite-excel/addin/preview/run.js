@@ -55,7 +55,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   check(true, 'Not signed in -> pane shows the Sign in button (API answered 401)');
   const registered = await page.evaluate(() => Object.keys(window.__cf).sort().join(','));
   check(registered === 'ACTIVITY,BALANCE', `Custom functions registered: ${registered} (=NS.BALANCE, =NS.ACTIVITY)`);
-  const preSignIn = await page.evaluate(async () => { try { await window.__cf.BALANCE('2000', 'Oct 2026', null, null, null, null, null, { address: 'Sheet1!A1' }); return 'no error'; } catch (e) { return `${e.code} ${e.message}`; } });
+  const preSignIn = await page.evaluate(async () => { try { await window.__cf.BALANCE('2000', 'Oct 2026', null, null, null, null, null, null, { address: 'Sheet1!A1' }); return 'no error'; } catch (e) { return `${e.code} ${e.message}`; } });
   check(/#N\/A Sign in/.test(preSignIn), `Formula before sign-in: ${preSignIn}`);
 
   // 2) Sign in via the dialog
@@ -74,12 +74,12 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
     const inv = (a) => ({ address: `Sheet1!${a}` });
     const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000;
     const calls = [];
-    for (let i = 0; i < 20; i++) calls.push(B(['1000', '1200', '2000', '4000', '5000'][i % 5], 'Oct 2026', null, null, null, null, null, inv(`A${i + 1}`)));
-    calls.push(B('0:ZZZZ', 'Oct 2026', null, null, null, null, null, inv('B1')));
-    calls.push(B(2000, serial('2026-10-31'), null, null, null, null, null, inv('B2')));
-    calls.push(A(1000, 'Oct 2026', null, null, null, null, null, null, inv('B3')));
-    calls.push(B('2000', 'Okt 2026', null, null, null, null, null, inv('B4')));
-    calls.push(B('2000', 'Oct 2026', 'Mock Sub 1', null, null, null, null, inv('B5')));
+    for (let i = 0; i < 20; i++) calls.push(B(['1000', '1200', '2000', '4000', '5000'][i % 5], 'Oct 2026', null, null, null, null, null, null, inv(`A${i + 1}`)));
+    calls.push(B('0:ZZZZ', 'Oct 2026', null, null, null, null, null, null, inv('B1')));
+    calls.push(B(2000, serial('2026-10-31'), null, null, null, null, null, null, inv('B2')));
+    calls.push(A(1000, 'Oct 2026', null, null, null, null, null, null, null, inv('B3')));
+    calls.push(B('2000', 'Okt 2026', null, null, null, null, null, null, inv('B4')));
+    calls.push(B('2000', 'Oct 2026', 'Mock Sub 1', null, null, null, null, null, inv('B5')));
     const settled = await Promise.allSettled(calls);
     return settled.map((s) => (s.status === 'fulfilled' ? { v: s.value } : { e: `${s.reason.code} ${s.reason.message}` }));
   });
