@@ -2,21 +2,17 @@
   "name": "netsuite-excel-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Read-only NetSuite SuiteQL proxy for the Excel add-in (Azure Functions, SWA managed).",
-  "main": "dist/src/functions/*.js",
+  "description": "Read-only NetSuite SuiteQL proxy for the Excel add-in (Azure Functions, SWA managed). Plain JavaScript, no build step.",
+  "main": "src/functions/*.js",
   "scripts": {
-    "build": "tsc",
-    "test": "tsc && node --test dist/test/api.test.js",
-    "start": "tsc && func start"
+    "test": "node --test",
+    "start": "func start"
   },
   "dependencies": {
     "@azure/functions": "^4.5.0"
   },
-  "devDependencies": {
-    "@types/node": "^20.14.0",
-    "typescript": "^5.4.5"
-  },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "type": "module"
 }

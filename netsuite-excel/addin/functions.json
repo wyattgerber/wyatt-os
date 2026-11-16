@@ -1,0 +1,39 @@
+{
+  "functions": [
+    {
+      "id": "BALANCE",
+      "name": "BALANCE",
+      "description": "NetSuite ending balance (debit minus credit; credit balances are negative). Balance sheet accounts are cumulative; P&L accounts are fiscal year-to-date.",
+      "helpUrl": "https://github.com/wyattgerber/wyatt-os/tree/main/netsuite-excel",
+      "result": { "type": "number" },
+      "parameters": [
+        { "name": "account", "description": "Account number (4000) or range (4000:4999)", "type": "any" },
+        { "name": "period_or_date", "description": "Accounting period name (\"Oct 2026\") or a date", "type": "any" },
+        { "name": "subsidiary", "description": "Subsidiary name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "profit_center", "description": "Profit Center name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "department", "description": "Department name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "location", "description": "Location name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "mode", "description": "Mode name or internal ID (blank = all)", "type": "any", "optional": true }
+      ],
+      "options": { "requiresAddress": true }
+    },
+    {
+      "id": "ACTIVITY",
+      "name": "ACTIVITY",
+      "description": "NetSuite net activity (debit minus credit) for a period or a range of periods.",
+      "helpUrl": "https://github.com/wyattgerber/wyatt-os/tree/main/netsuite-excel",
+      "result": { "type": "number" },
+      "parameters": [
+        { "name": "account", "description": "Account number (4000) or range (4000:4999)", "type": "any" },
+        { "name": "from_period", "description": "First accounting period (\"Jan 2026\")", "type": "any" },
+        { "name": "to_period", "description": "Last accounting period (blank = same as from_period)", "type": "any", "optional": true },
+        { "name": "subsidiary", "description": "Subsidiary name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "profit_center", "description": "Profit Center name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "department", "description": "Department name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "location", "description": "Location name or internal ID (blank = all)", "type": "any", "optional": true },
+        { "name": "mode", "description": "Mode name or internal ID (blank = all)", "type": "any", "optional": true }
+      ],
+      "options": { "requiresAddress": true }
+    }
+  ]
+}

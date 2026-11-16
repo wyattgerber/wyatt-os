@@ -4,7 +4,7 @@
   Runs the new posting-period Trial Balance SuiteQL against the sandbox (no Node needed) and checks it.
 
 .DESCRIPTION
-  !! The SQL below is a COPY of trialBalance in api/src/lib/catalog.ts (PowerShell cannot import it).
+  !! The SQL below is a COPY of trialBalance in api/src/lib/catalog.js (PowerShell cannot import it).
   !! Keep them identical; delete this script once the real runner (Invoke-LocalReport.ps1) can be used.
 
   Checks:  1) the period name matches exactly one monthly posting period (and shows the columns we rely on)
@@ -95,7 +95,7 @@ try {
     if ($monthly.Count -ne 1) { Write-Host "[FAIL] Expected exactly 1 monthly posting period named '$Period', found $($monthly.Count)." -ForegroundColor Red; exit 1 }
     Write-Host '[PASS] Period matches exactly one monthly posting period.' -ForegroundColor Green
 
-    # ---- SQL (copy of catalog.ts tbParts/trialBalance) ----
+    # ---- SQL (copy of catalog.js tbParts/trialBalance) ----
     $per = "(SELECT p.pstart AS pstart, p.pend AS pend, (SELECT MAX(y.startdate) FROM accountingperiod y WHERE y.isyear = 'T' AND y.startdate <= p.pstart) AS fystart " +
            "FROM (SELECT MAX(tp.startdate) AS pstart, MAX(tp.enddate) AS pend FROM accountingperiod tp WHERE tp.periodname = '$Period' AND tp.isquarter = 'F' AND tp.isyear = 'F') p)"
     $plTypes = "'Income', 'COGS', 'Expense', 'OthIncome', 'OthExpense'"
