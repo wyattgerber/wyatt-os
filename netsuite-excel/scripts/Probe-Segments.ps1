@@ -31,10 +31,12 @@ try {
 
     if ($Account) {
         # Fast two-step sample: first up to 50 transaction IDs that post to the account, then those lines only.
-        $ids = Invoke-SuiteQL $conn ("SELECT DISTINCT tal.transaction AS id FROM transactionaccountingline tal INNER JOIN account a ON a.id = tal.account " +
+        $ids = Invoke-SuiteQL $conn ("SELECT DISTINCT tal.transaction AS txn FROM transactionaccountingline tal INNER JOIN account a ON a.id = tal.account " +
             "WHERE a.acctnumber = '$Account' AND tal.posting = 'T' AND tal.accountingbook = 1") 50
         if ($ids.Status -ne 200) { throw "Finding transactions for account $Account failed (HTTP $($ids.Status)): $(Format-NsError $ids)" }
-        $idList = @(Get-Items $ids.Body | ForEach-Object { [long](Get-Prop $_ 'id') })
+        $idList = @(Get-Items $ids.Body | ForEach-Object { Get-Prop $_ 'txn' } | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [long]$_ })
+        Write-Host "Transaction IDs found for ${Account}: $($idList -join ', ')"
+        if ($idList.Count -eq 0) { Write-Host "Raw answer: $((Get-Items $ids.Body) | ConvertTo-Json -Compress -Depth 3)" }
         if ($idList.Count -eq 0) { throw "No posting transactions found for account $Account." }
         $r = Invoke-SuiteQL $conn "SELECT * FROM transactionline tl WHERE tl.transaction IN ($($idList -join ', '))" 1000
         if ($r.Status -ne 200) { throw "Sampling lines for account $Account failed (HTTP $($r.Status)): $(Format-NsError $r)" }
@@ -51,7 +53,10 @@ try {
         Write-Host ''
         foreach ($t in 'customrecord_cseg_appf_mode', 'customrecord_cseg_appf_serv_type') {
             $l = Invoke-SuiteQL $conn "SELECT id, name FROM $t ORDER BY id" 20
-            if ($l.Status -eq 200) { Write-Host "[OK]   value list $t : $((Get-Items $l.Body | ForEach-Object { "$(Get-Prop $_ 'id')=$(Get-Prop $_ 'name')" }) -join '; ')" -ForegroundColor Green }
+            if ($l.Status -eq 200) {
+                $items = Get-Items $l.Body
+                Write-Host "[OK]   value list $t : $($items.Count) rows; first row as returned: $(if ($items.Count) { $items[0] | ConvertTo-Json -Compress -Depth 3 } else { '(none)' })" -ForegroundColor Green
+            }
             else { Write-Host "[FAIL] value list $t -> HTTP $($l.Status): $(Format-NsError $l)" -ForegroundColor Red }
         }
         return
