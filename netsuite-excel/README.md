@@ -84,5 +84,5 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 4. **No subsidiary filter.** Aging covers current open items only.
 5. **SWA managed Functions time out at ~45 s.** If pulls approach that, switch to client-driven paging.
 6. **Sign-in dialog is unproven inside Excel** (open risk #1): dialog -> `/.auth/login/aad` -> `signin-complete.html` -> `messageParent`.
-7. **Not run yet:** `Invoke-LocalReport.ps1` / the API against real NetSuite (needs Node 20+, admin install on the work PC), the add-in in real Excel, and `npm run validate` (needs internet to Microsoft's validator and real SWA host in the manifest).
+7. **API end to end on a PC: done** (2026-11-16, GL Detail Oct 2026 via `Invoke-LocalReport.ps1`: 2,230 rows, 42,216,073.43 per side, PASS, 6.4 s). On the Nussbaum network Node needs `-UseWindowsCertificates` (corporate HTTPS inspection; Node otherwise rejects the certificate with UNABLE_TO_VERIFY_LEAF_SIGNATURE). Azure does not need it. **Not run yet:** the add-in in real Excel, and `npm run validate` (needs internet to Microsoft's validator and real SWA host in the manifest).
 8. **Stack:** plain HTML, CSS and JavaScript (ES modules) with no build step, per the citizen-dev guidance. The files in `addin/` and `api/` are exactly what gets deployed.
