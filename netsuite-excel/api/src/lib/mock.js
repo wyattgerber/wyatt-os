@@ -153,7 +153,21 @@ export class MockProvider {
         return [...acc.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([n, e]) => ({ acctnumber: n, debit: m(e.d), credit: m(e.c) }));
       }
       case 'lookup':
+        if (p.table === 'account') return ACCOUNTS.map((a, i) => ({ id: String(i + 1), acctnumber: a[0] }));
         return p.table === 'subsidiary' ? [1, 2, 3].map((i) => ({ id: String(i), name: `Mock Sub ${i}` })) : [];
+      case 'detail': {
+        const w = JSON.parse(p.window);
+        const nums = new Set(p.accounts.split(',').map((id) => ACCOUNTS[Number(id) - 1][0]));
+        const f = JSON.parse(p.filters || '{}');
+        const lo = w.kind === 'periods' ? mockPeriodStart(w.from) : w.fromDate;
+        const hi = w.kind === 'periods' ? mockPeriodEnd(w.to) : w.toDate;
+        return LINES.filter((l) => l.trandate >= lo && l.trandate <= hi && nums.has(l.acctnumber) && (!f.subsidiary || l.subsidiary === `Mock Sub ${f.subsidiary}`))
+          .sort((a, b) => a.trandate.localeCompare(b.trandate) || a.id - b.id || a.lineno - b.lineno || a.acctnumber.localeCompare(b.acctnumber))
+          .map((l) => ({
+            postingperiod: mockPeriodName(l.trandate), trandate: l.trandate, trantype: l.trantype, tranid: l.tranid, acctnumber: l.acctnumber, acctname: l.acctname,
+            entityname: l.entityname, subsidiary: l.subsidiary, memo: l.memo, debit: m(l.debit), credit: m(l.credit),
+          }));
+      }
       case 'periods': {
         const out = [];
         for (let y = 2025; y <= 2027; y++) {

@@ -16,7 +16,7 @@
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('trial_balance', 'journal_entries', 'gl_detail', 'ar_aging', 'ap_aging', 'formulas')][string]$Report,
+    [Parameter(Mandatory)][ValidateSet('trial_balance', 'journal_entries', 'gl_detail', 'ar_aging', 'ap_aging', 'formulas', 'detail')][string]$Report,
     [hashtable]$Params = @{},
     # For -Report formulas: an array of hashtables, e.g. @(@{ fn='balance'; account='1210'; period='Oct 2026' })
     [object[]]$Requests = @(),

@@ -7,7 +7,7 @@ import { ApiError, toErrorBody } from './errors.js';
 import { MockProvider } from './mock.js';
 import { NetSuiteClient } from './netsuite.js';
 import { runReport } from './runReport.js';
-import { evaluateBatch, FILTERS, MAX_REQUESTS } from './formulas.js';
+import { buildDetail, evaluateBatch, FILTERS, MAX_REQUESTS } from './formulas.js';
 
 const MAX_BODY_BYTES = 4096;
 let cachedClient;
@@ -70,6 +70,56 @@ async function loadLookup(provider, source, filterKey) {
   const list = res.items.map((r) => ({ id: String(r.id), name: String(r.name ?? '') }));
   lookupCache.set(ck, { at: Date.now(), list });
   return list;
+}
+
+/** [{id, acctnumber}] for every account, cached 10 minutes (drill-down expands account ranges with it). */
+async function loadAccounts(provider, source) {
+  const ck = `${source}|accounts`;
+  const hit = lookupCache.get(ck);
+  if (hit && Date.now() - hit.at < LOOKUP_CACHE_MS) return hit.list;
+  const list = [];
+  for (let off = 0; ; off += 1000) {
+    const res = await provider.query({ report: 'lookup', kind: 'rows', params: { table: 'account' }, sql: 'SELECT id, acctnumber FROM account ORDER BY id' }, off, 1000);
+    list.push(...res.items.map((r) => ({ id: String(r.id), acctnumber: r.acctnumber === null || r.acctnumber === undefined ? '' : String(r.acctnumber) })));
+    if (!res.hasMore || res.items.length < 1000) break;
+  }
+  lookupCache.set(ck, { at: Date.now(), list });
+  return list;
+}
+
+/** POST /api/detail  { request: {...one formula request...} }  ->  ReportResult whose rows add up to the cell. */
+export async function detailService(principalHeader, rawBody, deps = {}) {
+  const log = deps.log ?? (() => {});
+  const started = Date.now();
+  let user = 'unknown';
+  let request = null;
+  try {
+    const cfg = loadConfig(deps.env);
+    user = requireAllowed(principalHeader, cfg.allowedUsers).email;
+    if (Buffer.byteLength(rawBody, 'utf8') > MAX_BODY_BYTES) throw new ApiError(413, 'BODY_TOO_LARGE', 'The request was too large.');
+    let body;
+    try { body = JSON.parse(rawBody); } catch { throw new ApiError(400, 'BAD_JSON', 'The request was not in the expected format.'); }
+    if (!body || typeof body !== 'object' || Object.keys(body).some((k) => k !== 'request')) throw new ApiError(400, 'BAD_JSON', 'The request was not in the expected format.');
+    request = body.request;
+    const provider = deps.provider ?? providerFor(cfg, log);
+    const source = cfg.mock ? 'mock' : 'netsuite';
+    const result = await buildDetail(request, {
+      periods: await loadPeriods(provider, source),
+      provider,
+      log,
+      loadLookup: (k) => loadLookup(provider, source, k),
+      loadAccounts: () => loadAccounts(provider, source),
+      maxRows: cfg.maxRows,
+      user,
+      mock: cfg.mock,
+    });
+    log(`AUDIT ${JSON.stringify({ user, report: 'detail', request, status: 'ok', rows: result.info.rowCount, ms: Date.now() - started })}`);
+    return { status: 200, body: result };
+  } catch (e) {
+    const detail = e instanceof ApiError ? `${e.code}${e.detail ? ': ' + e.detail : ''}` : String(e);
+    log(`AUDIT ${JSON.stringify({ user, report: 'detail', request, status: 'error', error: detail.slice(0, 500), ms: Date.now() - started })}`);
+    return toErrorBody(e);
+  }
 }
 
 /** POST /api/balances  { requests: [...] }  ->  { results: [{ value } | { error }] }  (see formulas.js) */

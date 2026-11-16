@@ -23,6 +23,7 @@ Excel task pane (addin/, plain HTML + JS, Office.js, XML manifest; no build)
 | `api/src/functions/api.js` | Azure Functions v4 HTTP bindings (thin) |
 | `api/test/api.test.js` | 18 tests (mock data), incl. the PowerShell SQL-copy parity test |
 | `addin/manifest.xml` | Office add-in manifest (placeholders for the SWA host) |
+| Drill-down (`/api/detail`, **Show detail for selected cell**) | Lists the lines behind an `=NS.BALANCE` / `=NS.ACTIVITY` cell on a new sheet: ACTIVITY = lines in the period range; BALANCE = one **Opening balance** line (validated balance − lines) + the period's lines. Every detail sheet must add up exactly to the cell or nothing is returned. Refresh re-runs it. |
 | `addin/functions.js`, `addin/functions.json` | Excel custom functions `=NS.BALANCE(account, period_or_date, [subsidiary], [profit_center], [department], [location], [mode])` and `=NS.ACTIVITY(account, from, [to], ...)`; shared runtime with the task pane; cells calculated together are sent as one request |
 | `addin/preview/` | **Dev-only** preview: runs the real task pane in Chromium with the real API code in mock mode and a stand-in for Excel; `npm run preview` checks sign-in, period dropdowns, formats-before-values, frozen header, Refresh, and writes screenshots to `preview/out/` |
 | `addin/` | Served as-is (no build): `taskpane.html` + `taskpane.js` UI, `api.js` fetch, `auth.js` dialog sign-in, `excelWriter.js` sheet writer, `signin-complete.html`, `manifest.xml`, `assets/` |

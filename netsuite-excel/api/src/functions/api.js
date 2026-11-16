@@ -1,5 +1,5 @@
 import azureFunctions from '@azure/functions'; // CommonJS package: import the default, then take `app`
-import { formulasService, meService, periodsService, reportsService, runService } from '../lib/service.js';
+import { detailService, formulasService, meService, periodsService, reportsService, runService } from '../lib/service.js';
 
 const { app } = azureFunctions;
 
@@ -44,4 +44,11 @@ app.http('balances', {
   methods: ['POST'],
   authLevel: 'anonymous',
   handler: async (req, ctx) => toResponse(await formulasService(req.headers.get(PRINCIPAL), await req.text(), { log: (m) => ctx.log(m) })),
+});
+
+app.http('detail', {
+  route: 'detail',
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  handler: async (req, ctx) => toResponse(await detailService(req.headers.get(PRINCIPAL), await req.text(), { log: (m) => ctx.log(m) })),
 });

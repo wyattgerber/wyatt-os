@@ -80,7 +80,7 @@ const periodRangeParams = [
   { name: 'toPeriod', label: 'To period', type: 'text', required: true },
 ];
 
-const lineColumns = [
+export const lineColumns = [
   { key: 'postingperiod', label: 'Period', type: 'text' },
   { key: 'trandate', label: 'Date', type: 'date' },
   { key: 'trantype', label: 'Type', type: 'text' },
@@ -123,7 +123,7 @@ function lineQueries(p, extraWhere) {
   };
 }
 
-const lineSums = [
+export const lineSums = [
   { column: 'debit', alias: 'debits' },
   { column: 'credit', alias: 'credits' },
 ];
