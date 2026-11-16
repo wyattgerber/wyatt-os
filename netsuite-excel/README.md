@@ -85,6 +85,16 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 - **Drill-down validated (2026-11-16):** `BALANCE(1210, Oct 2026)` detail = 46 rows (opening 20,568,627.60 + 45 October lines totalling 9,488,003.76 Dr / 8,929,172.85 Cr, identical to NetSuite's GL report) adding up to 21,127,458.51; `ACTIVITY(1040, Oct 2026)` detail = the same 6 lines as NetSuite's GL report, adding up to −4,952,506.82.
 - Values are debit − credit (credit balances negative). Account ranges are inclusive (numeric order when both ends are digits).
 
+## Maintenance (put these in a calendar)
+
+| When | What | How |
+| --- | --- | --- |
+| **Before 2028-11-12** | **NetSuite certificate expires** (sandbox; production will have its own date). Pulls and formulas stop working when it does. | Run `scripts/New-NetSuiteCert.ps1` (new key into a new 1Password item), upload the new public `.pem` under Setup → Integration → OAuth 2.0 Client Credentials (M2M) Setup for `API_User`, give IT the new `NETSUITE_CERTIFICATE_ID` and `NETSUITE_PRIVATE_KEY` for the app settings, run `Test-NetSuite.ps1`, then revoke the old certificate. Start a few weeks early. |
+| When someone joins or leaves the accounting team | Access list | IT edits the `ALLOWED_USERS` app setting (users need no NetSuite login or role). |
+| After NetSuite upgrades, role changes or chart-of-accounts changes | Re-validate | Run `Test-NetSuite.ps1`, `Test-TrialBalance.ps1` (two periods), `Test-GLDetail.ps1`, `Test-Aging.ps1 -Kind AR/AP` and compare with NetSuite's reports as in the results above. |
+
+**Access model:** users sign in with their Microsoft account and are allowed only if listed in `ALLOWED_USERS`; all NetSuite reads go through the single read-only `API_User` integration. Everyone on the list can see everything that role can see (all subsidiaries, full GL and aging), regardless of their own NetSuite permissions: the data owner approves the list on that basis. Every pull and formula batch writes an `AUDIT` line with the user's email.
+
 ## Known problems (not done)
 
 1. **Trial Balance is validated** (see results above). Not supported: per-subsidiary TB, other accounting books. Re-validate if the chart of accounts' retained-earnings setup changes.
