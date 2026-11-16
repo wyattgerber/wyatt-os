@@ -30,14 +30,19 @@ try {
     $conn = Connect-NetSuite $Vault $Item
 
     if ($Account) {
-        $r = Invoke-SuiteQL $conn ("SELECT * FROM transactionline tl WHERE tl.transaction IN (SELECT tal.transaction FROM transactionaccountingline tal " +
-            "INNER JOIN account a ON a.id = tal.account WHERE a.acctnumber = '$Account' AND tal.posting = 'T')") 1000
+        # Fast two-step sample: first up to 50 transaction IDs that post to the account, then those lines only.
+        $ids = Invoke-SuiteQL $conn ("SELECT DISTINCT tal.transaction AS id FROM transactionaccountingline tal INNER JOIN account a ON a.id = tal.account " +
+            "WHERE a.acctnumber = '$Account' AND tal.posting = 'T' AND tal.accountingbook = 1") 50
+        if ($ids.Status -ne 200) { throw "Finding transactions for account $Account failed (HTTP $($ids.Status)): $(Format-NsError $ids)" }
+        $idList = @(Get-Items $ids.Body | ForEach-Object { [long](Get-Prop $_ 'id') })
+        if ($idList.Count -eq 0) { throw "No posting transactions found for account $Account." }
+        $r = Invoke-SuiteQL $conn "SELECT * FROM transactionline tl WHERE tl.transaction IN ($($idList -join ', '))" 1000
         if ($r.Status -ne 200) { throw "Sampling lines for account $Account failed (HTTP $($r.Status)): $(Format-NsError $r)" }
         $rows = Get-Items $r.Body
         $cols = [System.Collections.Generic.HashSet[string]]::new()
         foreach ($row in $rows) { foreach ($n in $row.PSObject.Properties.Name) { [void]$cols.Add($n) } }
         $interesting = @($cols | Where-Object { $_ -match '^cseg|^custcol|mode|serv' } | Sort-Object)
-        Write-Host "Lines on transactions posting to $Account sampled: $($rows.Count). Custom/segment columns seen: $($interesting -join ', ')"
+        Write-Host "Lines from $($idList.Count) transactions posting to $Account sampled: $($rows.Count). Custom/segment columns seen: $($interesting -join ', ')"
         foreach ($c in $interesting) {
             $n = @($rows | Where-Object { $null -ne (Get-Prop $_ $c) -and "$(Get-Prop $_ $c)" -ne '' }).Count
             $vals = @($rows | ForEach-Object { Get-Prop $_ $c } | Where-Object { $null -ne $_ -and "$_" -ne '' } | Select-Object -Unique -First 6) -join ', '
