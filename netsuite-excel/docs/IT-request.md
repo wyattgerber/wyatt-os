@@ -48,7 +48,7 @@ Node.js is a JavaScript runtime used to build and test the add-in and API.
 
 ## Already in place (for context)
 - NetSuite sandbox integration: OAuth 2.0 M2M, ES256 certificate (expires 2028-11-12), key only in 1Password.
-- `API_User` role is read-only (create attempts are rejected, verified). View permissions added during testing: Deposit, Manage Accounting Periods, Pay Bills, Enter Vendor Credits.
+- `API_User` role is read-only (create attempts are rejected, verified). View permissions added during testing: Deposit, Manage Accounting Periods, Pay Bills, Enter Vendor Credits, Locations, Departments.
 - Every report pull is checked against NetSuite's own totals; aging reports must tie to the AR/AP control accounts, or no data is returned.
 
 ## Later (NetSuite admin, not Azure)
