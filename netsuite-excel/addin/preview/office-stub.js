@@ -55,7 +55,15 @@
     },
     getActiveWorksheet() { if (!active) active = mk('Sheet1'); return wrap(active); },
   };
-  window.Excel = { run: async (cb) => cb({ workbook: { worksheets }, sync: async () => {} }) };
+  const application = { calculate(type) { window.__calculated = type; } };
+  window.Excel = { CalculationType: { full: 'Full' }, run: async (cb) => cb({ workbook: { worksheets, application }, sync: async () => {} }) };
+  // Custom functions: record what the add-in registers so the harness can call them like Excel would.
+  window.__cf = {};
+  window.CustomFunctions = {
+    associate(id, fn) { window.__cf[id] = fn; },
+    ErrorCode: { invalidValue: '#VALUE!', notAvailable: '#N/A' },
+    Error: class CustomFunctionError extends Error { constructor(code, message) { super(message); this.code = code; } },
+  };
   window.Office = {
     onReady(cb) { setTimeout(() => cb && cb({ host: 'Excel' }), 0); return Promise.resolve({ host: 'Excel' }); },
     AsyncResultStatus: { Succeeded: 'succeeded' },

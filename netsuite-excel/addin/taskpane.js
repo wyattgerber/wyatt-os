@@ -89,6 +89,7 @@ function setBusy(b) {
   busy = b;
   ($('run')).disabled = b;
   ($('refresh')).disabled = b;
+  ($('recalc')).disabled = b;
 }
 
 async function execute(reportId, params, refresh) {
@@ -159,6 +160,22 @@ Office.onReady(() => {
       void execute(saved.report, saved.params, true);
     } catch {
       setStatus('Could not read this sheet. Please try again.', 'err');
+    }
+  });
+  $('recalc').addEventListener('click', async () => {
+    if (busy) return;
+    setBusy(true);
+    setStatus('Recalculating NetSuite formulas...');
+    try {
+      await Excel.run(async (context) => {
+        context.workbook.application.calculate(Excel.CalculationType.full);
+        await context.sync();
+      });
+      setStatus('Recalculation started. Cells update as NetSuite answers.', 'ok');
+    } catch {
+      setStatus('Could not recalculate. Please try again.', 'err');
+    } finally {
+      setBusy(false);
     }
   });
   $('signinBtn').addEventListener('click', async () => {

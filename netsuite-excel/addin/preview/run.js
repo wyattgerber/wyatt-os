@@ -26,6 +26,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   let signedIn = false;
+  let balancePosts = 0;
   await page.exposeFunction('__markSignedIn', () => { signedIn = true; });
 
   await page.route('https://appsforoffice.microsoft.com/**', (r) => r.fulfill({ contentType: 'application/javascript', body: stub }));
@@ -37,6 +38,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
       if (u.pathname === '/api/me') r = await svc.meService(principal, { env });
       else if (u.pathname === '/api/reports') r = await svc.reportsService(principal, { env });
       else if (u.pathname === '/api/periods') r = await svc.periodsService(principal, { env });
+      else if (u.pathname === '/api/balances') { balancePosts++; r = await svc.formulasService(principal, route.request().postData() || '', { env, log: () => {} }); }
       else if (u.pathname === '/api/run') r = await svc.runService(principal, route.request().postData() || '', { env, log: () => {} });
       else r = { status: 404, body: {} };
       return route.fulfill({ status: r.status, contentType: 'application/json', body: JSON.stringify(r.body) });
@@ -51,6 +53,10 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   await page.waitForSelector('#signin:not([hidden])');
   await page.screenshot({ path: path.join(OUT, '1-signin.png') });
   check(true, 'Not signed in -> pane shows the Sign in button (API answered 401)');
+  const registered = await page.evaluate(() => Object.keys(window.__cf).sort().join(','));
+  check(registered === 'ACTIVITY,BALANCE', `Custom functions registered: ${registered} (=NS.BALANCE, =NS.ACTIVITY)`);
+  const preSignIn = await page.evaluate(async () => { try { await window.__cf.BALANCE('2000', 'Oct 2026', null, null, null, null, null, { address: 'Sheet1!A1' }); return 'no error'; } catch (e) { return `${e.code} ${e.message}`; } });
+  check(/#N\/A Sign in/.test(preSignIn), `Formula before sign-in: ${preSignIn}`);
 
   // 2) Sign in via the dialog
   await page.click('#signinBtn');
@@ -60,6 +66,33 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   check(await page.isVisible('#mock'), 'Red MOCK banner shown (API reports mock: true)');
   const opts = await page.$$eval('#report option', (o) => o.map((x) => x.textContent));
   check(opts.length === 5, `Report list: ${opts.join(', ')}`);
+
+  // 2b) Custom functions after sign-in: many cells -> one request; values; per-cell errors
+  balancePosts = 0;
+  const cf = await page.evaluate(async () => {
+    const B = window.__cf.BALANCE, A = window.__cf.ACTIVITY;
+    const inv = (a) => ({ address: `Sheet1!${a}` });
+    const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000;
+    const calls = [];
+    for (let i = 0; i < 20; i++) calls.push(B(['1000', '1200', '2000', '4000', '5000'][i % 5], 'Oct 2026', null, null, null, null, null, inv(`A${i + 1}`)));
+    calls.push(B('0:ZZZZ', 'Oct 2026', null, null, null, null, null, inv('B1')));
+    calls.push(B(2000, serial('2026-10-31'), null, null, null, null, null, inv('B2')));
+    calls.push(A(1000, 'Oct 2026', null, null, null, null, null, null, inv('B3')));
+    calls.push(B('2000', 'Okt 2026', null, null, null, null, null, inv('B4')));
+    calls.push(B('2000', 'Oct 2026', 'Mock Sub 1', null, null, null, null, inv('B5')));
+    const settled = await Promise.allSettled(calls);
+    return settled.map((s) => (s.status === 'fulfilled' ? { v: s.value } : { e: `${s.reason.code} ${s.reason.message}` }));
+  });
+  check(balancePosts === 1, `25 formula cells calculated together -> ${balancePosts} request to /api/balances`);
+  check(cf.slice(0, 20).every((x) => typeof x.v === 'number'), 'All 20 BALANCE cells returned numbers');
+  check(cf[20].v === 0, `=NS.BALANCE("0:ZZZZ","Oct 2026") nets to ${cf[20].v}`);
+  check(cf[21].v === cf[2].v, `A date typed in a cell (31 Oct 2026) gives the same balance as "Oct 2026": ${cf[21].v} = ${cf[2].v}`);
+  check(typeof cf[22].v === 'number', `=NS.ACTIVITY(1000,"Oct 2026") = ${cf[22].v}`);
+  check(/#VALUE! .*not an accounting period/.test(cf[23].e || ''), `Bad period shows its own error: ${cf[23].e}`);
+  check(typeof cf[24].v === 'number' && cf[24].v !== cf[2].v, `Subsidiary filter by name changes the answer: ${cf[24].v} vs ${cf[2].v}`);
+  await page.click('#recalc');
+  await page.waitForFunction(() => window.__calculated === 'Full');
+  check(true, 'Recalculate button asks Excel for a full recalculation (NetSuite formulas refresh)');
 
   // 3) Pick GL Detail; periods are dropdowns of real periods, defaulting to last month
   await page.selectOption('#report', 'gl_detail');

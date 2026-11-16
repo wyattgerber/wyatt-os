@@ -15,6 +15,7 @@ Excel task pane (addin/, plain HTML + JS, Office.js, XML manifest; no build)
 | Path | What |
 | --- | --- |
 | `api/src/lib/catalog.js` | **All SQL lives here.** Report definitions, parameter validation, SuiteQL builders |
+| `api/src/lib/formulas.js` | **F9-style formula engine** behind `POST /api/balances`: batches of `NS.BALANCE` / `NS.ACTIVITY`, grouped into one SuiteQL query per (function, period/date/range, filters); filters subsidiary, profit center (class), department, location, mode; names resolved to IDs in JS |
 | `api/src/lib/runReport.js` | Totals check, row cap, paging, exact reconciliation gate |
 | `api/src/lib/netsuite.js` | OAuth M2M JWT + SuiteQL client (retries, token cache) |
 | `api/src/lib/service.js` | `/api/me`, `/api/reports`, `/api/periods` (real monthly periods, cached 10 min), `/api/run` logic (rejects unknown periods / reversed ranges) + AUDIT log line |
@@ -22,6 +23,7 @@ Excel task pane (addin/, plain HTML + JS, Office.js, XML manifest; no build)
 | `api/src/functions/api.js` | Azure Functions v4 HTTP bindings (thin) |
 | `api/test/api.test.js` | 18 tests (mock data), incl. the PowerShell SQL-copy parity test |
 | `addin/manifest.xml` | Office add-in manifest (placeholders for the SWA host) |
+| `addin/functions.js`, `addin/functions.json` | Excel custom functions `=NS.BALANCE(account, period_or_date, [subsidiary], [profit_center], [department], [location], [mode])` and `=NS.ACTIVITY(account, from, [to], ...)`; shared runtime with the task pane; cells calculated together are sent as one request |
 | `addin/preview/` | **Dev-only** preview: runs the real task pane in Chromium with the real API code in mock mode and a stand-in for Excel; `npm run preview` checks sign-in, period dropdowns, formats-before-values, frozen header, Refresh, and writes screenshots to `preview/out/` |
 | `addin/` | Served as-is (no build): `taskpane.html` + `taskpane.js` UI, `api.js` fetch, `auth.js` dialog sign-in, `excelWriter.js` sheet writer, `signin-complete.html`, `manifest.xml`, `assets/` |
 | `scripts/New-NetSuiteCert.ps1` | Creates EC P-256 key + 730-day cert; private key goes straight to 1Password |
@@ -71,6 +73,12 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 - NetSuite omits null columns from SuiteQL rows (a credit-only account has no `debit`); the API renders those as 0.00.
 - NetSuite returns SUMs as doubles, sometimes in scientific notation (`4.221607343E7`). The API parses exponents exactly and rounds SUMs to cents in SQL (`ROUND(SUM(..), 2)`, unverified against real SuiteQL until the first API run).
 - `op whoami` makes the next `op` call fail on this setup; scripts avoid it.
+
+## Formulas (F9-style) status
+
+- **Validated on the sandbox through the real API (2026-11-16):** `ACTIVITY(1040, Oct 2026)` = −4,952,506.82 (NetSuite GL report); `BALANCE(3400, Jan/Oct 2026)` = −45,097.19 / −17,731,472.19 (NetSuite TB); whole ledger nets to 0.00; date basis = period basis at 2026-10-31 (3400, 1210); `BALANCE(1210, Oct 2026)` = 21,127,458.51 (NetSuite GL running balance); subsidiary filter by name (NTS) works and balances.
+- **Not yet validated:** Profit Center, Department, Location filters; a second subsidiary; Mode (no Mode data in the sandbox).
+- Values are debit − credit (credit balances negative). Account ranges are inclusive (numeric order when both ends are digits).
 
 ## Known problems (not done)
 

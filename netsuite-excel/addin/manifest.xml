@@ -21,8 +21,9 @@
     <Host Name="Workbook"/>
   </Hosts>
   <Requirements>
-    <Sets DefaultMinVersion="1.12">
+    <Sets DefaultMinVersion="1.1">
       <Set Name="ExcelApi" MinVersion="1.12"/>
+      <Set Name="SharedRuntime" MinVersion="1.1"/>
     </Sets>
   </Requirements>
   <DefaultSettings>
@@ -32,6 +33,24 @@
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Hosts>
       <Host xsi:type="Workbook">
+        <!-- One long-lived page for the task pane AND the custom functions, so the formulas share the pane's sign-in. -->
+        <Runtimes>
+          <Runtime resid="Taskpane.Url" lifetime="long"/>
+        </Runtimes>
+        <AllFormFactors>
+          <ExtensionPoint xsi:type="CustomFunctions">
+            <Script>
+              <SourceLocation resid="Functions.Script.Url"/>
+            </Script>
+            <Page>
+              <SourceLocation resid="Taskpane.Url"/>
+            </Page>
+            <Metadata>
+              <SourceLocation resid="Functions.Metadata.Url"/>
+            </Metadata>
+            <Namespace resid="Functions.Namespace"/>
+          </ExtensionPoint>
+        </AllFormFactors>
         <DesktopFormFactor>
           <GetStarted>
             <Title resid="GetStarted.Title"/>
@@ -77,8 +96,11 @@
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Taskpane.Url" DefaultValue="https://REPLACE-WITH-SWA-HOST.azurestaticapps.net/taskpane.html"/>
+        <bt:Url id="Functions.Script.Url" DefaultValue="https://REPLACE-WITH-SWA-HOST.azurestaticapps.net/functions.js"/>
+        <bt:Url id="Functions.Metadata.Url" DefaultValue="https://REPLACE-WITH-SWA-HOST.azurestaticapps.net/functions.json"/>
       </bt:Urls>
       <bt:ShortStrings>
+        <bt:String id="Functions.Namespace" DefaultValue="NS"/>
         <bt:String id="Group.Label" DefaultValue="NetSuite"/>
         <bt:String id="Button.Label" DefaultValue="NetSuite"/>
         <bt:String id="GetStarted.Title" DefaultValue="NetSuite reports are ready"/>
