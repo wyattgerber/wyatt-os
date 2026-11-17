@@ -68,7 +68,7 @@ test('a normal send attaches the PDF, emails every recipient and records the day
 test('empty report: dataRows() === 0 stops the ATTACHMENT; the email still goes with a link and a note', () => {
     const t = setup({ engine: { rows: 0 } }); t.run();
     assert.ok(!t.calls.includes('exportPdf'), 'no export is attempted');
-    assert.equal(t.sent.length, 1, 'the email itself is still sent (see change log: the brief says it "stops the email")');
+    assert.equal(t.sent.length, 1, 'the email itself is still sent, with the link and note (decided 2026-11-17)');
     assert.equal(t.sent[0].attachments, undefined);
     assert.match(t.sent[0].body, /came back empty/);
     assert.match(t.sent[0].body, /<a href="https:\/\/acct\.app\.netsuite\.com\/app\/site\/hosting\/scriptlet\.nl\?script=customscript_saved_sl/);

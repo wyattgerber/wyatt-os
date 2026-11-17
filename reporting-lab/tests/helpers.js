@@ -30,6 +30,8 @@ function sliceDecl(src, start) {
     for (; i < src.length; i++) {
         const c = src[i];
         if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
+        if (c === '/' && src[i + 1] === '/') { i = src.indexOf('\n', i); if (i < 0) break; continue; }       // comments may hold apostrophes
+        if (c === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i + 2) + 1; continue; }
         if (c === '"' || c === "'" || c === '`') { q = c; continue; }
         if (c === '{') depth++;
         else if (c === '}' && --depth === 0) break;

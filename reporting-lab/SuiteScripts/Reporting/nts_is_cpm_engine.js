@@ -4198,19 +4198,23 @@ var __api=(function(){
   }
   const schTime = S => { const m=/^(\d{1,2}):(\d{2})$/.exec(String(S.time||'')); const h=m?+m[1]:S.hour, mi=m?m[2]:'00'; return (h%12===0?12:h%12)+':'+mi+(h<12?' AM':' PM'); };
   const schWhen = S => (S.freq==='daily' ? 'Every day' : S.freq==='weekly' ? 'Every '+SCH_DOW[S.dow] : 'Monthly on the '+(S.dom==='last'?'last day':S.dom+(['th','st','nd','rd'][(S.dom%10<4 && (S.dom<11||S.dom>13)) ? S.dom%10 : 0]))) + ' at '+schTime(S) + ' · '+({pdf:'PDF attached',xlsx:'Excel attached',both:'PDF and Excel attached',link:'link only'}[S.attach||'link'])+(S.view && S.view.graph ? ' · graph by link' : '');
+  // a schedule can be changed by its owner or an administrator, or by anyone when its owner ticked Shared; only they can delete it
+  const schCanEdit = r => r.canEdit!==undefined ? !!r.canEdit : !!r.canDelete;
   function schList(){
     const mine=SAVED.filter(r=>r.def && r.def.kind==='schedule');
     if(!mine.length) return '<p class="pnote">Nothing is scheduled yet.</p>';
     return mine.map(r=>{ const S=r.def.sched;
       return '<div class="sch-row'+(S.enabled===false?' off':'')+(r.id===schEditId?' editing':'')+'"><div><b>'+esc(S.reportName||'Report')+'</b><span>'+esc(schWhen(S))+(S.enabled===false?' · paused':'')+'</span>'
-        + '<span>To '+esc(S.emails.join(', '))+'</span><span>'+(S.lastSent?'Last sent '+esc(S.lastSent):'Not sent yet')+' · by '+esc(r.ownerName||'someone')+'</span></div>'
+        + '<span>To '+esc(S.emails.join(', '))+'</span><span>'+(S.lastSent?'Last sent '+esc(S.lastSent):'Not sent yet')+' · by '+esc(r.ownerName||'someone')+(r.def.pub?' · shared':'')+'</span></div>'
         + '<div class="sch-act"><button type="button" class="btn sm ghost" data-schtest="'+r.id+'">Send me a test</button>'
-        + (r.canDelete ? '<button type="button" class="btn sm ghost" data-schedit="'+r.id+'">Edit</button><button type="button" class="btn sm ghost" data-schpause="'+r.id+'">'+(S.enabled===false?'Resume':'Pause')+'</button><button type="button" class="btn sm ghost" data-schdel="'+r.id+'">Delete</button>' : '')+'</div></div>'; }).join('');
+        + (schCanEdit(r) ? '<button type="button" class="btn sm ghost" data-schedit="'+r.id+'">Edit</button><button type="button" class="btn sm ghost" data-schpause="'+r.id+'">'+(S.enabled===false?'Resume':'Pause')+'</button>' : '')
+        + (r.canDelete ? '<button type="button" class="btn sm ghost" data-schdel="'+r.id+'">Delete</button>' : '')+'</div></div>'; }).join('');
   }
   let schEditId=0;          // the saved schedule being edited in the form, or 0 for a new one
   function schEndEdit(resetForm){
     schEditId=0;
     if(!$('schFormH')) return;
+    $('schPub').checked=false; $('schPub').disabled=false;
     $('schFormH').textContent='New schedule'; $('schSave').textContent='Schedule'; $('schCancel').hidden=true; $('schKeepW').hidden=true; $('schUseNow').checked=false;
     if(resetForm){ $('schTo').value=''; $('schFreq').value='weekly'; $('schDow').value='1'; $('schDom').value='1'; $('schTime').value='07:00'; $('schAsof').value='latest'; $('schAttach').value='pdf'; $('schMsg').value=''; $('schFreq').dispatchEvent(new Event('change')); }
   }
@@ -4220,6 +4224,7 @@ var __api=(function(){
     $('schTo').value=(S.emails||[]).join(', '); $('schFreq').value=S.freq||'weekly'; $('schDow').value=String(S.dow==null?1:S.dow); $('schDom').value=String(S.dom==null?1:S.dom);
     $('schTime').value=/^\d{1,2}:\d{2}$/.test(String(S.time||'')) ? String(S.time).replace(/^(\d):/,'0$1:') : String(S.hour||7).padStart(2,'0')+':00';
     $('schAsof').value=S.asof||'latest'; $('schAttach').value=S.attach||'pdf'; $('schGraph').checked=!!(S.view&&S.view.graph);
+    $('schPub').checked=!!r.def.pub; $('schPub').disabled=!r.canDelete;
     $('schSubj').value=S.subject||S.reportName||''; $('schMsg').value=S.message||''; $('schMsgOut').textContent='';
     $('schFreq').dispatchEvent(new Event('change')); $('schList').innerHTML=schList(); $('schTo').focus();
   }
@@ -4239,6 +4244,7 @@ var __api=(function(){
         + '<label class="sch-f"><span>Month shown</span><select id="schAsof"><option value="latest">The latest closed month</option><option value="current">The current month</option></select></label>'
         + '<label class="sch-f"><span>Send as</span><select id="schAttach"><option value="pdf" selected>A PDF attachment</option><option value="xlsx">An Excel attachment</option><option value="both">Both attached</option><option value="link">Only a link</option></select></label>'
         + '<label class="sch-f sch-ck"><span>&nbsp;</span><span class="sch-check"><input type="checkbox" id="schGraph"> Include Graph?</span></label>'
+        + '<label class="sch-f sch-ck"><span>&nbsp;</span><span class="sch-check" title="Off: only you (and administrators) can change this schedule. On: anyone can edit or pause it. Only you can delete it."><input type="checkbox" id="schPub"> Shared</span></label>'
         + '<label class="sch-f wide"><span>Subject</span><input id="schSubj" maxlength="120"></label>'
         + '<label class="sch-f wide"><span>Message</span><textarea id="schMsg" rows="2" maxlength="1000" placeholder="Optional"></textarea></label>'
         + '<label class="sch-f sch-ck wide" id="schKeepW" hidden><span>&nbsp;</span><span class="sch-check"><input type="checkbox" id="schUseNow"> Use the report and filters on screen now (otherwise they stay as scheduled)</span></label>'
@@ -4272,8 +4278,9 @@ var __api=(function(){
                      enabled: editing ? editing.def.sched.enabled!==false : true, lastSent: editing ? (editing.def.sched.lastSent||'') : '', view};
         $('schSave').disabled=true; $('schMsgOut').textContent='';
         try{
-          const res = editing ? post('savereport',{id:editing.id, name:editing.name, def:JSON.stringify({kind:'schedule', sched})})
-                              : post('savereport',{name:'Schedule · '+rn+' · '+Date.now().toString(36), def:JSON.stringify({kind:'schedule', sched})});
+          const pub = editing && !editing.canDelete ? !!editing.def.pub : $('schPub').checked;      // only the owner or an administrator changes Shared
+          const res = editing ? post('savereport',{id:editing.id, name:editing.name, def:JSON.stringify({kind:'schedule', sched, pub})})
+                              : post('savereport',{name:'Schedule · '+rn+' · '+Date.now().toString(36), def:JSON.stringify({kind:'schedule', sched, pub})});
           SAVED=res.reports;
           if(editing){ schEndEdit(true); $('schList').innerHTML=schList(); $('schMsgOut').textContent='Saved the changes.'; }
           else { $('schList').innerHTML=schList(); $('schTo').value=''; $('schMsgOut').textContent='Scheduled.'; }
@@ -4289,7 +4296,7 @@ var __api=(function(){
         try{
           if(t.dataset.schtest){ const rr=post('schedulesend',{id}); $('schMsgOut').textContent = 'A test is being built, with its attachments, and will reach you in a minute or two.'; }
           else if(t.dataset.schpause){ const S=Object.assign({}, r.def.sched, {enabled:r.def.sched.enabled===false});
-            const res=post('savereport',{id, name:r.name, def:JSON.stringify({kind:'schedule', sched:S})}); SAVED=res.reports; }
+            const res=post('savereport',{id, name:r.name, def:JSON.stringify({kind:'schedule', sched:S, pub:!!r.def.pub})}); SAVED=res.reports; }
           else if(t.dataset.schdel){ if(!confirm('Delete this scheduled email?')){ t.disabled=false; return; } const res=post('deletereport',{id}); SAVED=res.reports; }
           $('schList').innerHTML=schList();
         }catch(err){ $('schMsgOut').textContent=err.message; t.disabled=false; }

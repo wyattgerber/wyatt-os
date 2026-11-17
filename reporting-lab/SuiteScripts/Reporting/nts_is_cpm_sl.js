@@ -1349,7 +1349,9 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
     }
 
     // A custom report (layout, or saved columns) is private to the person who made it unless they ticked Public.
-    // Flag settings and schedules are shared settings and stay visible to everyone. allRows = true skips the filter
+    // Flag settings and schedules are shared settings and stay visible to everyone, with who made them.
+    // Changing a schedule: its owner, an administrator, or anyone at all when the owner ticked Shared (pub).
+    // Deleting one stays with its owner or an administrator. allRows = true skips the filter
     // (name checks and deletes by the owner or an administrator).
     function listReports(allRows) {
         const me = runtime.getCurrentUser();
@@ -1363,8 +1365,10 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
                 try { def = convertIds(JSON.parse(r.def), false, getM); } catch (e) { /* unreadable definitions are listed but not usable */ }
                 return { id: Number(r.id), name: r.name, def, owner: Number(r.owner) || 0, ownerName: r.ownername || '',
                          pub: !!(def && def.pub === true), mine: Number(r.owner) === Number(me.id),
-                         canDelete: Number(r.owner) === Number(me.id) || (admin && def && (def.kind === 'flagcfg' || def.kind === 'schedule')) };
+                         canDelete: Number(r.owner) === Number(me.id) || (admin && def && (def.kind === 'flagcfg' || def.kind === 'schedule')),
+                         sharedSchedule: !!(def && def.kind === 'schedule' && def.pub === true) };
             });
+        all.forEach(r => { r.canEdit = r.canDelete || r.sharedSchedule; delete r.sharedSchedule; });
         if (allRows) return all;
         const shared = k => k === 'flagcfg' || k === 'schedule';
         return all.filter(r => r.mine || r.pub || (r.def && shared(r.def.kind)));
@@ -1381,7 +1385,7 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
         const isLayout = def && def.kind === 'layout';
         let payload;
         if (def && def.kind === 'flagcfg') payload = JSON.stringify({ v: 1, kind: 'flagcfg', cfg: cleanFlagCfg(def.cfg) });
-        else if (def && def.kind === 'schedule') payload = JSON.stringify({ v: 1, kind: 'schedule', sched: cleanSchedule(def.sched) });
+        else if (def && def.kind === 'schedule') payload = JSON.stringify({ v: 1, kind: 'schedule', sched: cleanSchedule(def.sched), pub: def.pub === true });
         else if (isLayout) {
             const lay = cleanLayout(def.layout);
             let cols;
@@ -1402,7 +1406,11 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
         if (editId) {
             target = all.find(r => r.id === editId);
             if (!target) throw error('NOT_FOUND', 'That layout no longer exists.');
-            if (!target.canDelete) throw error('NOT_ALLOWED', `Only ${target.ownerName || 'its creator'} or an administrator can change "${target.name}".`);
+            if (!target.canEdit) throw error('NOT_ALLOWED', `Only ${target.ownerName || 'its creator'} or an administrator can change "${target.name}".`);
+            if (!target.canDelete) {                                    // someone else's shared schedule: it stays a schedule, and stays shared
+                if (!def || def.kind !== 'schedule') throw error('NOT_ALLOWED', `"${target.name}" is a shared schedule; it can only be saved as a schedule.`);
+                const keep = JSON.parse(payload); keep.pub = true; payload = JSON.stringify(keep);
+            }
         }
         // a name only clashes with reports this person can see (theirs and the public ones), and a public report needs a name no other public report has
         const wantPub = def && def.pub === true && (isLayout || def.kind === 'is' || def.kind === 'bs');
