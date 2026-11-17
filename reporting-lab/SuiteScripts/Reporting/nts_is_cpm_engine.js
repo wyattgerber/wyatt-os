@@ -4720,7 +4720,7 @@ var __api=(function(){
     else pvStart();                                  // every other report starts in the simple (pivot) builder, after choosing a report to build from; Advanced builder is one click away
   });
   // settings
-  try{ applyTheme(localStorage.getItem('ntsRepTheme')==='dark'); }catch(e){}
+  try{ applyTheme(!DASH && localStorage.getItem('ntsRepTheme')==='dark'); }catch(e){}      // the dashboard portlet is always light
   $('setBtn').addEventListener('click',e=>{ e.stopPropagation(); const open=$('setPanel').hidden; $('setPanel').hidden=!open; $('setBtn').setAttribute('aria-expanded', String(open)); });
   document.addEventListener('click',e=>{ if(!$('setPanel').hidden && !e.target.closest('#setMenu')){ $('setPanel').hidden=true; $('setBtn').setAttribute('aria-expanded','false'); } });
   $('darkTog').addEventListener('change',e=>{ applyTheme(e.target.checked); if(LAST.C && !$('graphWrap').hidden) renderGraph(LAST.C,LAST.K); try{ localStorage.setItem('ntsRepTheme', e.target.checked?'dark':'light'); }catch(_){} });
