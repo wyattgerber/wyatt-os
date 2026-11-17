@@ -4205,7 +4205,7 @@ var __api=(function(){
     if(!mine.length) return '<p class="pnote">Nothing is scheduled yet.</p>';
     return mine.map(r=>{ const S=r.def.sched;
       return '<div class="sch-row'+(S.enabled===false?' off':'')+(r.id===schEditId?' editing':'')+'"><div><b>'+esc(S.reportName||'Report')+'</b><span>'+esc(schWhen(S))+(S.enabled===false?' · paused':'')+'</span>'
-        + '<span>To '+esc(S.emails.join(', '))+'</span><span>'+(S.lastSent?'Last sent '+esc(S.lastSent):'Not sent yet')+' · by '+esc(r.ownerName||'someone')+(r.def.pub?' · shared':'')+'</span></div>'
+        + '<span>To '+(S.emailCount!==undefined ? S.emailCount+' recipient'+(S.emailCount===1?'':'s')+' (shown to whoever can change this schedule)' : esc((S.emails||[]).join(', ')))+'</span><span>'+(S.lastSent?'Last sent '+esc(S.lastSent):'Not sent yet')+' · by '+esc(r.ownerName||'someone')+(r.def.pub?' · shared':'')+'</span></div>'
         + '<div class="sch-act"><button type="button" class="btn sm ghost" data-schtest="'+r.id+'">Send me a test</button>'
         + (schCanEdit(r) ? '<button type="button" class="btn sm ghost" data-schedit="'+r.id+'">Edit</button><button type="button" class="btn sm ghost" data-schpause="'+r.id+'">'+(S.enabled===false?'Resume':'Pause')+'</button>' : '')
         + (r.canDelete ? '<button type="button" class="btn sm ghost" data-schdel="'+r.id+'">Delete</button>' : '')+'</div></div>'; }).join('');

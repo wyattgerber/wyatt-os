@@ -1371,7 +1371,12 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
         all.forEach(r => { r.canEdit = r.canDelete || r.sharedSchedule; delete r.sharedSchedule; });
         if (allRows) return all;
         const shared = k => k === 'flagcfg' || k === 'schedule';
-        return all.filter(r => r.mine || r.pub || (r.def && shared(r.def.kind)));
+        // a schedule's recipients are shown only to those who can change it; everyone else sees how many there are
+        return all.filter(r => r.mine || r.pub || (r.def && shared(r.def.kind))).map(r => {
+            if (r.canEdit || !r.def || r.def.kind !== 'schedule' || !r.def.sched) return r;
+            const emails = Array.isArray(r.def.sched.emails) ? r.def.sched.emails : [];
+            return Object.assign({}, r, { def: Object.assign({}, r.def, { sched: Object.assign({}, r.def.sched, { emails: [], emailCount: emails.length }) }) });
+        });
     }
 
     function saveReport(ctx) {

@@ -100,3 +100,19 @@ test('a shared schedule does not open up layouts or saved reports', () => {
     assert.equal(r.canEdit, false);
     assert.equal(h.call(OTHER, 'savereport', { id, name: 'Mine', def: JSON.stringify({ kind: 'schedule', sched: sched(), pub: true }) }).ok, false);
 });
+
+test('recipients are hidden from anyone who cannot change the schedule; they see how many there are', () => {
+    const h = suitelet();
+    const two = sched({ emails: ['a@example.com', 'b@example.com'] });
+    const priv = save(h, OWNER, {}, two, false).id;
+    const shared = save(h, OWNER, { name: 'Schedule · other · y' }, two, true).id;
+    const other = row(h, OTHER, priv);
+    assert.deepEqual([...other.def.sched.emails], []);
+    assert.equal(other.def.sched.emailCount, 2);
+    assert.equal(other.ownerName, 'User 5', 'who made it is still shown');
+    assert.deepEqual([...row(h, OWNER, priv).def.sched.emails], ['a@example.com', 'b@example.com']);
+    assert.deepEqual([...row(h, ADMIN, priv).def.sched.emails], ['a@example.com', 'b@example.com']);
+    assert.deepEqual([...row(h, OTHER, shared).def.sched.emails], ['a@example.com', 'b@example.com'], 'a shared schedule can be changed, so its recipients show');
+    assert.equal(row(h, OTHER, priv).def.sched.emailCount !== undefined && row(h, OWNER, priv).def.sched.emailCount, undefined);
+    assert.ok(JSON.parse(h.DB[0].def).sched.emails.length === 2, 'the stored record is untouched');
+});

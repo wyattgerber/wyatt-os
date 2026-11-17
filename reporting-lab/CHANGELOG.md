@@ -13,8 +13,9 @@ Branch `claude/reporting-lab`. Files are in `SuiteScripts/Reporting/`. Nothing w
 | build_engine.py | Added unchanged to `tools/`. |
 | Task 1 | `build_engine.py` fixed, and the engine regenerated. |
 | Schedules | The Shared box on schedules (your decision on task 5, see below). The page, the Suitelet and the engine all changed. |
+| Schedules | Recipients hidden from users who can't change the schedule. The page, the Suitelet and the engine changed. |
 
-Run the tests with Node 18 or later. They use mocked `N/*` modules and nothing in `tests/` goes to NetSuite. All 43 pass.
+Run the tests with Node 18 or later. They use mocked `N/*` modules and nothing in `tests/` goes to NetSuite. All 44 pass.
 
 ```
 node --test reporting-lab/tests/*.test.js
@@ -87,15 +88,15 @@ Other ids for reference:
 - I assumed **Pause/Resume counts as editing**, so anyone can pause a shared schedule. Tell me if it should be the owner only.
 - **Tests:** `tests/schedule_sharing.test.js`. I did not test the page in a browser.
 
-**Still open: not changed, waiting for your decision:**
+**Decided 2026-11-17, second round:**
 
-1. **Recipients' emails** are still sent to every user's browser along with each schedule (`listReports`, `nts_is_cpm_sl.js` around line 1373). Seeing who scheduled a report doesn't need the email list. I can hide it from users who can't edit the schedule.
-2. **"Send me a test"** still works on any schedule for any user (`sendScheduleTest`). It sends only to the requester.
-3. **Administrator context.**
-   - The scheduled script runs as an administrator and gets the report data through the Suitelet as that user.
-   - So any schedule or test is built with administrator visibility, not the requester's.
-   - Any user can save a schedule to any email address. Together, that lets someone receive figures their own role can't see and send them outside the company.
-   - Shared schedules widen this a little, because anyone can now change the recipients of a shared schedule.
+1. **Recipients' emails are now hidden** from anyone who can't change the schedule.
+   - `listReports()` sends them an empty `emails` list plus `emailCount`, and the page shows "To N recipients".
+   - The owner, administrators and, for a shared schedule, everyone still see the addresses.
+   - The stored record and the scheduled script are unchanged.
+   - Tests are in `schedule_sharing.test.js`.
+2. **"Send me a test"** on any schedule stays as it is.
+3. **Visibility:** everyone with access to the builder may see all reports. No change.
 
 ## Not verifiable from the repo
 
