@@ -1094,7 +1094,7 @@ var __api=(function(){
   function openSave(){
     const cur = state.preset.indexOf('saved:')===0 ? savedById(state.preset) : null;
     $('saveName').value = cur ? cur.name : (state.basedOn || ''); $('savePub').checked = !!(cur && cur.def && cur.def.pub);
-    $('saveMsg').innerHTML = '<span class="dim">Only you can see a saved report unless you make it public. '
+    $('saveMsg').innerHTML = '<span class="dim">Only you can see a saved report unless you share it. '
       + 'Columns are kept relative to the As of month, so the report rolls forward.</span>';
     $('saveReplace').hidden=true; $('saveGo').hidden=false;
     $('saveDlg').hidden=false; $('saveName').focus(); $('saveName').select();
@@ -2756,7 +2756,7 @@ var __api=(function(){
     d.id='lb'; d.className='lb'; d.hidden=true; d.setAttribute('aria-label','Layout builder');
     d.innerHTML =
       '<div class="lb-head"><input id="lbName" class="lb-name" placeholder="Layout name" maxlength="80" aria-label="Layout name">'
-      + '<div class="lb-acts"><span class="lb-dirty" id="lbDirty"></span>'
+      + '<div class="lb-acts"><label class="lb-chk" title="Off: a personal report only you see. On: it moves to Shared, where everyone can run it and only you can change it."><input type="checkbox" id="lbPub"> Shared</label><span class="lb-dirty" id="lbDirty"></span>'
       + '<button type="button" class="btn sm ghost" id="lbPrev" title="Hide the builder and look at the report">Preview</button>'
       + '<button type="button" class="btn sm ghost" id="lbDel">Delete</button>'
       + '<button type="button" class="btn sm ghost" id="lbClose">Close</button>'
@@ -4589,7 +4589,7 @@ var __api=(function(){
     if(!ov){
       ov=document.createElement('div'); ov.id='pv'; ov.className='pv'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-label','Pivot builder');
       ov.innerHTML='<div class="pv-head"><input id="pvName" placeholder="Name this report" maxlength="80" aria-label="Report name"><span class="pv-dirty" id="pvDirty"></span>'
-        + '<div class="pv-hact"><button type="button" class="btn sm ghost" id="pvAdv" title="Lines, totals and calculations">Advanced builder</button><button type="button" class="btn sm ghost" id="pvDel" hidden>Delete</button>'
+        + '<div class="pv-hact"><label class="lb-chk" title="Off: a personal report only you see. On: it moves to Shared, where everyone can run it and only you can change it."><input type="checkbox" id="pvPub"> Shared</label><button type="button" class="btn sm ghost" id="pvAdv" title="Lines, totals and calculations">Advanced builder</button><button type="button" class="btn sm ghost" id="pvDel" hidden>Delete</button>'
         + '<button type="button" class="btn sm ghost" id="pvClose">Close</button><button type="button" class="btn sm" id="pvSave">Save</button></div></div>'
         + '<div class="pv-body"><aside class="pv-pal">'
         + '<section><h3>Accounts</h3><input id="pvQ" placeholder="Search accounts by number or name" autocomplete="off" aria-label="Search accounts"><div class="pv-chips" id="pvAcct"></div></section>'
@@ -5275,7 +5275,7 @@ var __api=(function(){
   }
   // ---------- earlier notes on an account ----------
   const NOTES = {};                         // account number -> its notes, kept until a note is saved or reopened
-  const NOTE_SC=' @@';
+  const NOTE_SC=' @@';                      // a note's label ends with the report and page it was written on
   const noteScope = n => { const i=n.label.lastIndexOf(NOTE_SC); return i<0 ? '' : n.label.slice(i+NOTE_SC.length); };
   const noteParts = n0 => { const n={label:n0.label.indexOf(NOTE_SC)<0 ? n0.label : n0.label.slice(0,n0.label.lastIndexOf(NOTE_SC))}; const i=n.label.lastIndexOf(' — '); return i<0 ? {acct:n.label, cmp:''} : {acct:n.label.slice(0,i), cmp:n.label.slice(i+3)}; };
   function notesFor(acct){
@@ -5290,7 +5290,7 @@ var __api=(function(){
   function loadPopHist(f){
     const box=$('popHist'); if(!box) return;
     try{
-      const sc=scopeKey(), all=(notesFor(f.num)).filter(n=>n.key!==f.key && noteScope(n)===sc), show=all.slice(0,4);
+      const sc=scopeKey(), all=(notesFor(f.num)).filter(n=>n.key!==f.key && noteScope(n)===sc), show=all.slice(0,4);     // only this report's page
       if(!POP || POP.f!==f || !$('popHist')) return;
       $('popHist').innerHTML='<p class="dk">Earlier notes on '+esc(f.num)+(all.length?' <small>'+all.length+'</small>':'')+'</p>'
         + (show.length ? show.map(noteHtml).join('') : '<p class="pnote">None yet.</p>')

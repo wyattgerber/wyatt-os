@@ -5,8 +5,9 @@ edges change: the data calls become direct server calls, the page's controls bec
 removed so it runs start to finish in a Scheduled Script. Rebuild it whenever the page changes."""
 import re, sys
 
-src = open(sys.argv[1] if len(sys.argv) > 1 else '/home/claude/work/page.html', encoding='utf-8').read()
-out_path = sys.argv[2] if len(sys.argv) > 2 else '/mnt/user-data/outputs/suitelet/nts_is_cpm_engine.js'
+if len(sys.argv) != 3: sys.exit('usage: build_engine.py <nts_is_cpm_page.html> <out nts_is_cpm_engine.js>')
+src = open(sys.argv[1], encoding='utf-8').read()
+out_path = sys.argv[2]
 blocks = [m.group(1) for m in re.finditer(r'<script[^>]*>(.*?)</script>', src, re.S)]
 script = max(blocks, key=len)
 xlsx_block = '\n'.join(b for b in blocks if b is not script)          # the Excel writer sits in its own block ahead of the page script
@@ -29,7 +30,7 @@ sub1('(function(){\n  "use strict";', 'var __api=(function(){\n  "use strict";')
 sub1("  (function init(){", "  function init(){")
 sub1("    } catch(e){ status(e.message,true); $('subtitle').textContent='Could not load'; }\n  })();\n})();",
      "    } catch(e){ status(e.message,true); if(HOST.error) HOST.error(e); }\n  }\n"
-     "  return {init:init, applySchedule:applySchedule, exportXlsx:exportXlsx, exportPdf:exportPdf, state:state, isBS:isBS, isLayout:isLayout, isPivot:isPivot, renderAll:renderAll, loadData:loadData, fileName:fileName};\n})();\nreturn __api;")
+     "  return {init:init, applySchedule:applySchedule, exportXlsx:exportXlsx, exportPdf:exportPdf, state:state, isBS:isBS, dataRows:dataRows, isLayout:isLayout, isPivot:isPivot, renderAll:renderAll, loadData:loadData, fileName:fileName};\n})();\nreturn __api;")
 
 prelude = r'''
   // ---- the edges of the engine: stand-ins for what a browser provides ----
@@ -134,7 +135,7 @@ prelude = r'''
   if(!String.prototype.padEnd) String.prototype.padEnd = function(n, c){ var s = String(this); c = c === undefined ? ' ' : String(c); while(s.length < n) s += c; return s; };
 '''
 
-body = ("/**\n * Nussbaum Reporting Lab — the report engine, without a browser.\n *\n * GENERATED from nts_is_cpm_page.html by build_engine.py: do not edit by hand. It is the page's own calculation and\n"
+body = ("/**\n * Nussbaum Reporting Lab — the report engine, without a browser.\n *\n * @NApiVersion 2.1\n * @NModuleScope SameAccount\n *\n * GENERATED from nts_is_cpm_page.html by build_engine.py: do not edit by hand. It is the page's own calculation and\n"
         " * export code, so a scheduled report is built exactly as the page builds it. The Scheduled Script (nts_is_cpm_sched.js)\n"
         " * loads this module, hands it a host that answers the data requests, and collects the Excel and PDF it makes.\n"
         " * Upload it to the File Cabinet beside the page and the Scheduled Script, and upload a new copy whenever the page changes.\n */\n"
