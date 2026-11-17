@@ -27,7 +27,7 @@ define(['N/url', 'N/runtime'], (url, runtime) => {
 
     function render(params) {
         const portlet = params.portlet;
-        portlet.title = 'Income Statement';
+        portlet.title = 'Reporting Lab';
         const script = runtime.getCurrentScript();
         const scriptId = script.getParameter({ name: 'custscript_nts_dash_script' }) || 'customscript_nts_reporting_lab';
         const deploymentId = script.getParameter({ name: 'custscript_nts_dash_deploy' }) || 'customdeploy_nts_reporting_lab';

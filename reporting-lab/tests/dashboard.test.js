@@ -58,7 +58,7 @@ function renderPortlet(params, resolveThrows) {
 
 test('portlet: frames the Suitelet in dashboard mode, using the script parameters', () => {
     const { portlet, seen } = renderPortlet({ custscript_nts_dash_script: 'customscript_nts_reporting_lab', custscript_nts_dash_deploy: 'customdeploy_x', custscript_nts_dash_height: '800' });
-    assert.equal(portlet.title, 'Income Statement');
+    assert.equal(portlet.title, 'Reporting Lab');
     assert.deepEqual(JSON.parse(JSON.stringify(seen[0])), { scriptId: 'customscript_nts_reporting_lab', deploymentId: 'customdeploy_x', params: { dash: '1' } });
     assert.match(portlet.html, /^<iframe src="\/app\/site\/hosting\/scriptlet\.nl\?script=1&amp;deploy=1&amp;dash=1"/);
     assert.match(portlet.html, /height:800px/);
