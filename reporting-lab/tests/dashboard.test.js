@@ -67,6 +67,6 @@ test('portlet: frames the Suitelet in dashboard mode, using the script parameter
 test('portlet: default height, and a plain message when the Suitelet ids are wrong', () => {
     assert.match(renderPortlet({ custscript_nts_dash_height: '5' }).portlet.html, /height:640px/);
     const bad = renderPortlet({}, true).portlet.html;
-    assert.match(bad, /could not be found \(customscript_nts_is_cpm_sl \/ customdeploy_nts_is_cpm_sl\)/);
+    assert.match(bad, /could not be found \(customscript_nts_reporting_lab \/ customdeploy_nts_reporting_lab\)/);
     assert.doesNotMatch(bad, /<iframe/);
 });

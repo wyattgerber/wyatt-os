@@ -14,8 +14,9 @@
  *   1. Upload this file to the File Cabinet (any folder; the same folder as the Suitelet is tidy).
  *   2. Create a Script record from it. Portlet Type: Inline HTML. Script id: customscript_nts_is_cpm_portlet
  *      Parameters (Free-Form Text unless noted):
- *        custscript_nts_dash_script   Script ID of the Reporting Lab Suitelet (check it on the Suitelet's script record)
- *        custscript_nts_dash_deploy   Deployment ID of the Reporting Lab Suitelet
+ *        custscript_nts_dash_script   The Reporting Lab Suitelet (its Script ID, or a List/Record parameter pointing at it).
+ *                                     Blank: customscript_nts_reporting_lab (the sandbox Suitelet, checked 2026-11-17)
+ *        custscript_nts_dash_deploy   Its Deployment ID. Blank: customdeploy_nts_reporting_lab
  *        custscript_nts_dash_height   Integer: the portlet's height in pixels. Default 640.
  *   3. Deploy it (Status Released, audience the roles that use the Reporting Lab). Deployment id: customdeploy_nts_is_cpm_portlet
  *   4. Each person adds it on their Home dashboard: Personalize > Custom Portlet, then pick this script in the portlet's Set Up.
@@ -28,8 +29,8 @@ define(['N/url', 'N/runtime'], (url, runtime) => {
         const portlet = params.portlet;
         portlet.title = 'Income Statement';
         const script = runtime.getCurrentScript();
-        const scriptId = script.getParameter({ name: 'custscript_nts_dash_script' }) || 'customscript_nts_is_cpm_sl';
-        const deploymentId = script.getParameter({ name: 'custscript_nts_dash_deploy' }) || 'customdeploy_nts_is_cpm_sl';
+        const scriptId = script.getParameter({ name: 'custscript_nts_dash_script' }) || 'customscript_nts_reporting_lab';
+        const deploymentId = script.getParameter({ name: 'custscript_nts_dash_deploy' }) || 'customdeploy_nts_reporting_lab';
         const h = Number(script.getParameter({ name: 'custscript_nts_dash_height' }));
         const height = Number.isInteger(h) && h >= 200 && h <= 2000 ? h : 640;
         let src;
