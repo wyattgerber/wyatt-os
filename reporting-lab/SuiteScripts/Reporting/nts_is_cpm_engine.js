@@ -321,6 +321,11 @@ var __api=(function(){
   // statement order: new groups sit after fixed expenses; taxes and ESOP sit below net operating income
   const sectionOrder = () => [0,1,2,...dynIS(),3];
   const $ = id => document.getElementById(id);
+  // Dashboard mode (?dash=1, from the dashboard portlet): the statement only, as of the last closed month, fully collapsed,
+  // showing the report this person last picked in the portlet (remembered in this browser).
+  const DASH = new URLSearchParams(location.search).get('dash')==='1';
+  const DASH_KEY = 'nts_is_dash_report';
+  if(DASH) document.documentElement.classList.add('dash');
 
   let META = null, DATA = null, BSDATA = null;
   const state = {
@@ -368,7 +373,9 @@ var __api=(function(){
     $('stepper').title = ['Showing section totals only','Showing parent accounts and accounts without children','Showing every account, children under their parents'][L];
   }
   // a report that is opened starts at the middle level, whatever the last one was left at
-  function resetExpansion(){ state.nLevel=1; state.qOpen=false; state.qOpenYr={}; state.tOpen={}; state.levels={view:1, analyze:1}; Object.keys(open).forEach(k=>{ open[k]=true; }); }
+  function resetExpansion(){ state.nLevel=1; state.qOpen=false; state.qOpenYr={}; state.tOpen={}; state.levels={view:1, analyze:1}; Object.keys(open).forEach(k=>{ open[k]=true; });
+    if(DASH){ state.nLevel=0; state.levels={view:0, analyze:0}; }      // the dashboard opens fully collapsed: section totals only
+  }
   function stepLevel(d){
     if(lNest()){ if(curLayout().nest==='all') state.nLevel=Math.max(0,Math.min(nMax(),state.nLevel+d)); else state.qOpen = d>0; state.qOpenYr={}; state.tOpen={}; renderAll(); return; }
     const m=state.mode;
@@ -774,6 +781,14 @@ var __api=(function(){
     if(cur) return cur.id;
     const started=META.periods.filter(p=>p.start<=t).sort((a,b)=>a.start<b.start?1:-1);
     return (started[0]||META.periods[0]||{}).id;
+  }
+
+  // the last month marked closed in NetSuite; if none is, the month before this one
+  function lastClosedAsOf(){
+    const t=today(), closed=META.periods.filter(p=>p.closed && p.start<=t).sort((a,b)=>a.start<b.start?1:-1);
+    if(closed[0]) return closed[0].id;
+    const before=META.periods.filter(p=>p.end && p.end<t).sort((a,b)=>a.start<b.start?1:-1);
+    return (before[0] || {}).id || defaultAsOf();
   }
 
   // Which statement a report is. A balance sheet's "month" columns hold the balance at that month end.
@@ -3635,6 +3650,7 @@ var __api=(function(){
     if(value==='custom') return;
     if(LDRAFT && !(value==='layout:'+LDRAFT.id)){ closeBuilder(false); if(LDRAFT){ renderReportBar(); return; } }
     state.preset=value; state.kind=kindOfPreset(state.preset);
+    if(DASH){ try{ localStorage.setItem(DASH_KEY, value); }catch(e){} }      // the portlet remembers each person's choice
     if(isLayout()){ const k=state.preset.slice(7); state.layoutId = (k==='new' || k.indexOf('d:')===0) ? k : +k; state.page=0; }
     state.cols=buildPreset(state.preset, state.asOf);
     const r=savedById(state.preset); state.basedOn = r ? r.name : '';
@@ -3668,7 +3684,7 @@ var __api=(function(){
   document.addEventListener('click',e=>{ if(!$('asPanel').hidden && !e.target.closest('#asOfMenu')) asOpen(false); });
   document.addEventListener('keydown',e=>{ if(e.key==='Escape' && !$('asPanel').hidden){ asOpen(false); $('asBtn').focus(); } });
   $('stepIn').addEventListener('click',()=>stepLevel(1));
-  try{ state.showAll = localStorage.getItem('nts_is_showall')==='1'; }catch(e){}
+  try{ state.showAll = !DASH && localStorage.getItem('nts_is_showall')==='1'; }catch(e){}
   $('oldOR').checked=!!state.oldOR;
   $('oldOR').addEventListener('change',e=>{ state.oldOR=e.target.checked;
     if(isBS()){ if(BSDATA) renderAll(); } else if(DATA && DATA.periods.length) renderAll(); });
@@ -5050,7 +5066,7 @@ var __api=(function(){
     state.mode = m==='analyze' ? 'analyze' : 'view';           // the old Accounts mode is now the "Show accounts without activity" switch
     document.body.classList.toggle('view', state.mode==='view');
     document.querySelectorAll('.modesw button[data-mode]').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.mode===state.mode)));
-    try{ localStorage.setItem('nts_is_mode', state.mode); }catch(e){}
+    if(!DASH){ try{ localStorage.setItem('nts_is_mode', state.mode); }catch(e){} }      // the dashboard leaves the full page's choice alone
     if(!skipRender) renderAll();
   }
   document.querySelector('.modesw').addEventListener('click',e=>{
@@ -5559,14 +5575,24 @@ var __api=(function(){
       // default: the month-end package as of the last completed period; every non-elimination subsidiary
       indexPeriods(); indexChart(); mergeGroupDefs(META.groupDefs, META.groupNames);
       SAVED = META.reports || [];
-      state.asOf = defaultAsOf();
+      state.asOf = DASH ? lastClosedAsOf() : defaultAsOf();
+      if(DASH){
+        let k=null; try{ k=localStorage.getItem(DASH_KEY); }catch(e){}
+        if(k && presetKnown(k)){
+          state.preset=k; state.kind=kindOfPreset(k);
+          if(isLayout()){ const s=k.slice(7); state.layoutId=(s==='new' || s.indexOf('d:')===0) ? s : +s; }
+          const r=savedById(k); state.basedOn = r ? r.name : '';
+        }
+        resetExpansion();
+        $('dashFull').href=ENDPOINT;
+      }
       state.cols = buildPreset(state.preset, state.asOf);
       META.subsidiaries.forEach(s=>state.subs.add(s.id));           // the elimination subsidiaries too, so consolidated figures carry their eliminations
       renderReportBar();
       DATA = {periods:[],accounts:[],rows:[],miles:[]};
       FILTERS.forEach(f=>{ if(f!=='sep' && !f.server) state[f.key]=new Set([0]); });
       renderFilters();
-      let m='view'; try{ m=localStorage.getItem('nts_is_mode')||'view'; }catch(e){}
+      let m='view'; try{ if(!DASH) m=localStorage.getItem('nts_is_mode')||'view'; }catch(e){}
       setMode(m, true); applyFold();
       loadData();
       const sid=new URLSearchParams(location.search).get('sid'); if(sid) applySchedule(sid);

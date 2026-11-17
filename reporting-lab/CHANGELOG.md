@@ -14,8 +14,9 @@ Branch `claude/reporting-lab`. Files are in `SuiteScripts/Reporting/`. Nothing w
 | Task 1 | `build_engine.py` fixed, and the engine regenerated. |
 | Schedules | The Shared box on schedules (your decision on task 5, see below). The page, the Suitelet and the engine all changed. |
 | Schedules | Recipients hidden from users who can't change the schedule. The page, the Suitelet and the engine changed. |
+| Dashboard | New `nts_is_cpm_portlet.js`, plus a dashboard mode on the page (`?dash=1`). The engine was regenerated. |
 
-Run the tests with Node 18 or later. They use mocked `N/*` modules and nothing in `tests/` goes to NetSuite. All 44 pass.
+Run the tests with Node 18 or later. They use mocked `N/*` modules and nothing in `tests/` goes to NetSuite. All 51 pass.
 
 ```
 node --test reporting-lab/tests/*.test.js
@@ -97,6 +98,30 @@ Other ids for reference:
    - Tests are in `schedule_sharing.test.js`.
 2. **"Send me a test"** on any schedule stays as it is.
 3. **Visibility:** everyone with access to the builder may see all reports. No change.
+
+## Dashboard portlet (2026-11-17)
+
+**Files**
+- **`nts_is_cpm_portlet.js`** (new): an Inline HTML portlet that shows the Reporting Lab page in a frame, in dashboard mode.
+  - Script parameters: the Suitelet's Script ID and Deployment ID (`custscript_nts_dash_script` and `custscript_nts_dash_deploy`) and the height (`custscript_nts_dash_height`, default 640).
+  - Setup steps are in the file's header.
+- **Page, `?dash=1`:**
+  - It shows only the statement, the Report and As of pickers, Collapse/Expand, and "Open the full Reporting Lab ↗".
+  - It opens **as of the last closed month**: the latest period marked closed, or failing that the month before this one.
+  - It opens **fully collapsed** (section totals only).
+  - It shows the report this person last picked in the portlet. The choice is kept in their browser.
+- **Full page:** the dashboard does not change its remembered View/Analyze mode or its "show accounts without activity" setting.
+
+**Not tested in NetSuite**
+- That an Inline HTML portlet shows a Suitelet frame.
+- The portlet height on a real dashboard.
+- How long the home page takes to load with a large report.
+
+**Known limit**
+- The report choice is per browser. On a new computer, or after clearing the browser's data, the portlet starts on the default report.
+
+**Found while doing this (not changed)**
+- The schedule form's "The latest closed month" option uses the page's default month, `defaultAsOf()`, which is the month we are **in**, not the last closed one.
 
 ## Not verifiable from the repo
 
