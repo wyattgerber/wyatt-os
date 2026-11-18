@@ -22,9 +22,10 @@
  *      and keep nts_is_cpm_page.html / nts_is_cpm_sl.js / nts_is_cpm_pdf.xml where they already are.
  *   2. Create a Script record from this file. Script id: customscript_nts_is_cpm_sched
  *      Create these parameters on it (Free-Form Text):
- *        custscript_nts_sched_author   Sender: the internal id of the employee the emails come from. Required.
- *        custscript_nts_sched_script   Script id of the Reporting Lab Suitelet.      Default: customscript_nts_is_cpm_sl
- *        custscript_nts_sched_deploy   Deployment id of the Reporting Lab Suitelet.  Default: customdeploy_nts_is_cpm_sl
+ *        custscript_nts_sched_author   Sender: the employee the emails come from, as an internal id or an email address
+ *                                      (an email address is looked up among active employees). Required.
+ *        custscript_nts_sched_script   Script id of the Reporting Lab Suitelet.      Default: customscript_nts_reporting_lab
+ *        custscript_nts_sched_deploy   Deployment id of the Reporting Lab Suitelet.  Default: customdeploy_nts_reporting_lab
  *        custscript_nts_sched_only     (leave blank) used by "Send me a test": one schedule's id to run now
  *        custscript_nts_sched_test_to  (leave blank) used by "Send me a test": the person to send that test to
  *   3. Deploy it. Deployment id: customdeploy_nts_is_cpm_sched. Status Scheduled, repeat every 15 minutes or every hour,
@@ -37,12 +38,16 @@
  * Not in the attachment: the graph (a graph cannot be drawn on the server). A schedule with Include Graph? ticked adds a
  * link that opens the report with the graph.
  */
-define(['N/search', 'N/record', 'N/email', 'N/url', 'N/runtime', 'N/format', 'N/log', 'N/https', 'N/file', './nts_is_cpm_engine'],
-(search, record, email, url, runtime, format, log, https, file, createEngine) => {
+define(['N/search', 'N/record', 'N/email', 'N/url', 'N/runtime', 'N/format', 'N/log', 'N/https', 'N/file', 'N/query', './nts_is_cpm_engine'],
+(search, record, email, url, runtime, format, log, https, file, query, createEngine) => {
 
-    const BUILD = '2026-11-12a';                                        // shown in the Execution Log and on test emails, to tell which copy of this script is running
+    const BUILD = '2026-11-18a';                                        // shown in the Execution Log and on test emails, to tell which copy of this script is running
     const REPORT_RECORD = 'customrecord_nts_is_report';
     const DEF_FIELD = 'custrecord_nts_isr_definition';
+    // The Reporting Lab Suitelet, by its text Script ID and Deployment ID (the same in sandbox and production), used when the
+    // parameters are blank and a schedule does not name its own Suitelet.
+    const DEFAULT_SL_SCRIPT = 'customscript_nts_reporting_lab';
+    const DEFAULT_SL_DEPLOY = 'customdeploy_nts_reporting_lab';
 
     const esc = x => String(x === undefined || x === null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const ymd = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -53,6 +58,22 @@ define(['N/search', 'N/record', 'N/email', 'N/url', 'N/runtime', 'N/format', 'N/
         try { return JSON.parse(raw); } catch (e) { /* truncated: read it whole below */ }
         try { return JSON.parse(record.load({ type: REPORT_RECORD, id: Number(id) }).getValue(DEF_FIELD)); }
         catch (e) { log.error('Could not read schedule ' + id, (e && (e.stack || e.message)) || e); return null; }
+    }
+
+    // The Sender parameter: an employee internal id, or an email address looked up among active employees (once per run).
+    // No match, or more than one, stops the run with a message that names the address.
+    const senderCache = {};
+    function resolveSender(raw) {
+        const v = String(raw === undefined || raw === null ? '' : raw).trim();
+        if (!v) throw new Error('Set the Sender parameter (custscript_nts_sched_author) to an employee internal id or email address.');
+        if (/^\d+$/.test(v)) return Number(v);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error('The Sender parameter (custscript_nts_sched_author) is "' + v + '": use an employee internal id or email address.');
+        const key = v.toLowerCase();
+        if (senderCache[key]) return senderCache[key];
+        const rows = query.runSuiteQL({ query: "SELECT id FROM employee WHERE LOWER(email) = ? AND isinactive = 'F'", params: [key] }).asMappedResults();
+        if (!rows.length) throw new Error('Sender lookup: no active employee has the email address ' + v + ' (custscript_nts_sched_author).');
+        if (rows.length > 1) throw new Error('Sender lookup: ' + rows.length + ' active employees have the email address ' + v + ' (custscript_nts_sched_author). Use the employee internal id instead.');
+        return (senderCache[key] = Number(rows[0].id));
     }
 
     function schedules(onlyId) {
@@ -148,10 +169,9 @@ define(['N/search', 'N/record', 'N/email', 'N/url', 'N/runtime', 'N/format', 'N/
     function execute() {
         const script = runtime.getCurrentScript();
         log.audit('Reporting Lab scheduler ' + BUILD, 'deployment ' + script.deploymentId);
-        const author = Number(script.getParameter({ name: 'custscript_nts_sched_author' }));
-        if (!author) throw new Error('Set the Sender parameter (custscript_nts_sched_author) to an employee internal id.');
-        const scriptId = script.getParameter({ name: 'custscript_nts_sched_script' }) || 'customscript_nts_is_cpm_sl';
-        const deployId = script.getParameter({ name: 'custscript_nts_sched_deploy' }) || 'customdeploy_nts_is_cpm_sl';
+        const author = resolveSender(script.getParameter({ name: 'custscript_nts_sched_author' }));
+        const scriptId = script.getParameter({ name: 'custscript_nts_sched_script' }) || DEFAULT_SL_SCRIPT;
+        const deployId = script.getParameter({ name: 'custscript_nts_sched_deploy' }) || DEFAULT_SL_DEPLOY;
         const only = Number(script.getParameter({ name: 'custscript_nts_sched_only' })) || 0;
         const testTo = Number(script.getParameter({ name: 'custscript_nts_sched_test_to' })) || 0;
         const host = 'https://' + url.resolveDomain({ hostType: url.HostType.APPLICATION });

@@ -100,10 +100,10 @@ for (const [what, tx, ext, oid] of CASES) {
     });
 }
 
-test('AP bills, and only AP bills, get "Open in Vendor Lookup" (script 1911, deploy 1, external URL)', () => {
+test('AP bills, and only AP bills, get "Open in Vendor Lookup" (by text Script ID and Deployment ID, external URL)', () => {
     const bill = entryFor({ type: 'VendBill', oid: null });
-    assert.equal(bill.lookup, 'https://ext/vendorlookup?script=1911&deploy=1&b=55');
-    deq(bill.resolved[0], { scriptId: 1911, deploymentId: 1, returnExternalUrl: true, params: { b: 55 } });
+    assert.equal(bill.lookup, 'https://ext/vendorlookup?script=customscript_vendor_invoice_lookup&deploy=customdeploy_vendor_invoice_lookup&b=55');
+    deq(bill.resolved[0], { scriptId: 'customscript_vendor_invoice_lookup', deploymentId: 'customdeploy_vendor_invoice_lookup', returnExternalUrl: true, params: { b: 55 } });
     for (const type of ['CustInvc', 'Journal', 'CustPymt']) assert.equal(entryFor({ type, oid: '1', itype: 'Sales' }).lookup, '', type);
 });
 

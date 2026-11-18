@@ -7,6 +7,8 @@ const { loadAmd, mockLog } = require('./helpers');
 const deq = (a, b, msg) => assert.deepEqual(JSON.parse(JSON.stringify(a)), b, msg);
 
 const SCHED_ID = 42;
+// active employees by (lower-case) email, as the Sender lookup would find them
+const EMPLOYEES = { 'reports@example.com': [7], 'shared@example.com': [7, 8] };
 function scheduleDef(over) {
     return { v: 1, kind: 'schedule', sched: Object.assign({
         reportName: 'Month End', emails: ['a@example.com', 'b@example.com'], freq: 'daily', time: '00:00', attach: 'pdf',
@@ -16,7 +18,7 @@ function scheduleDef(over) {
 
 // engine: { rows: what dataRows() returns, bs: isBS(), files: what an export "downloads" }
 function setup({ def = scheduleDef(), params = {}, engine = {} } = {}) {
-    const sent = [], submitted = [], calls = [], log = mockLog();
+    const sent = [], submitted = [], calls = [], queries = [], log = mockLog();
     const rows = [{ id: SCHED_ID, name: 'My schedule', def: JSON.stringify(def) }];
     const search = { create: ({ filters }) => ({ run: () => ({ each(cb) {
         const only = filters.find(f => Array.isArray(f) && f[0] === 'internalid');
@@ -46,10 +48,11 @@ function setup({ def = scheduleDef(), params = {}, engine = {} } = {}) {
                       format: ({ value, type }) => (type === 'time' ? '11:59 pm' : value), parse: ({ value }) => value },
         'N/log': log, 'N/https': {},
         'N/file': { Type: { PDF: 'PDF', EXCEL: 'EXCEL' }, create: o => o },
+        'N/query': { runSuiteQL: ({ query: sql, params: qp }) => { queries.push({ sql, params: qp }); return { asMappedResults: () => (EMPLOYEES[qp[0]] || []).map(id => ({ id })) }; } },
         './nts_is_cpm_engine': createEngine
     };
     const sched = loadAmd('nts_is_cpm_sched.js', mocks);
-    return { run: () => sched.execute(), sent, submitted, calls, log };
+    return { run: () => sched.execute(), sent, submitted, calls, queries, log };
 }
 
 test('a normal send attaches the PDF, emails every recipient and records the day', () => {
@@ -108,7 +111,7 @@ test('the schedule\'s own Suitelet ids win over the script parameters', () => {
     const t = setup({ def: scheduleDef({ attach: 'link' }), params: { custscript_nts_sched_script: 'customscript_param_sl' } }); t.run();
     assert.match(t.sent[0].body, /script=customscript_saved_sl/);
     const noSl = setup({ def: scheduleDef({ attach: 'link', sl: undefined }) }); noSl.run();
-    assert.match(noSl.sent[0].body, /script=customscript_nts_is_cpm_sl&amp;deploy=customdeploy_nts_is_cpm_sl/, 'built-in default when neither is set');
+    assert.match(noSl.sent[0].body, /script=customscript_nts_reporting_lab&amp;deploy=customdeploy_nts_reporting_lab/, 'built-in default when neither is set');
 });
 
 test('already sent today, disabled, or not due: nothing is sent', () => {
@@ -141,4 +144,24 @@ test('test-send of a schedule that cannot be found tells the requester', () => {
 test('no Sender parameter is an error', () => {
     const t = setup({ params: { custscript_nts_sched_author: '' } });
     assert.throws(() => t.run(), /custscript_nts_sched_author/);
+});
+
+test('Sender as an email address: looked up among active employees, once per run', () => {
+    const t = setup({ params: { custscript_nts_sched_author: ' Reports@Example.com ' } }); t.run();
+    assert.equal(t.sent[0].author, 7);
+    assert.equal(t.queries.length, 1);
+    assert.deepEqual([...t.queries[0].params], ['reports@example.com']);
+    assert.match(t.queries[0].sql, /FROM employee WHERE LOWER\(email\) = \? AND isinactive = 'F'/);
+});
+
+test('Sender as an internal id needs no lookup', () => {
+    const t = setup(); t.run();
+    assert.equal(t.sent[0].author, 7);
+    assert.equal(t.queries.length, 0);
+});
+
+test('Sender email with no match, or more than one, stops the run with a message naming the address', () => {
+    assert.throws(() => setup({ params: { custscript_nts_sched_author: 'nobody@example.com' } }).run(), /no active employee has the email address nobody@example\.com/);
+    assert.throws(() => setup({ params: { custscript_nts_sched_author: 'shared@example.com' } }).run(), /2 active employees have the email address shared@example\.com/);
+    assert.throws(() => setup({ params: { custscript_nts_sched_author: 'not an id' } }).run(), /use an employee internal id or email address/);
 });

@@ -12,13 +12,13 @@
  *
  * Setup (once):
  *   1. Upload this file to the File Cabinet (any folder; the same folder as the Suitelet is tidy).
- *   2. Create a Script record from it. Portlet Type: Inline HTML. Script id: customscript_nts_is_cpm_portlet
+ *   2. Create a Script record from it. Portlet Type: Inline HTML. Script id in production: customscript_report_dashboard
  *      Parameters (Free-Form Text unless noted):
  *        custscript_nts_dash_script   The Reporting Lab Suitelet (its Script ID, or a List/Record parameter pointing at it).
- *                                     Blank: customscript_nts_reporting_lab (the sandbox Suitelet, checked 2026-11-17)
+ *                                     Blank: customscript_nts_reporting_lab (the Reporting Lab Suitelet's Script ID)
  *        custscript_nts_dash_deploy   Its Deployment ID. Blank: customdeploy_nts_reporting_lab
  *        custscript_nts_dash_height   Integer: the portlet's height in pixels. Default 640.
- *   3. Deploy it (Status Released, audience the roles that use the Reporting Lab). Deployment id: customdeploy_nts_is_cpm_portlet
+ *   3. Deploy it (Status Released, audience the roles that use the Reporting Lab). Sandbox deployment id: customdeploy_report_lab_dashboard
  *   4. Each person adds it on their Home dashboard: Personalize > Custom Portlet, then pick this script in the portlet's Set Up.
  */
 define(['N/url', 'N/runtime'], (url, runtime) => {

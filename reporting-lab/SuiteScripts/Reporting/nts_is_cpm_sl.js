@@ -148,6 +148,10 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
     // "Send me a test" tries this deployment first (same script, status Not Scheduled, no repeat), then the repeating one above.
     // A deployment that repeats can refuse an on-demand run while it holds a queued one; a deployment that never repeats does not.
     const SCHED_TEST_DEPLOY = 'customdeploy_nts_is_cpm_sched_test';
+    // The Vendor Invoice Lookup Suitelet, which AP invoices link to ("Open in Vendor Lookup"), by its text Script ID and Deployment ID.
+    // These text IDs are the same in sandbox and production (the internal ids are not), so nothing changes when this file is promoted.
+    // The deployment needs an external URL.
+    const VENDOR_LOOKUP = { script: 'customscript_vendor_invoice_lookup', deploy: 'customdeploy_vendor_invoice_lookup' };
     const REPORT_RECORD = 'customrecord_nts_is_report';
     const REPORT_DEF_FIELD = 'custrecord_nts_isr_definition';
     const MAX_SAVED_COLUMNS = 16;
@@ -980,10 +984,6 @@ define(['N/query', 'N/search', 'N/file', 'N/render', 'N/url', 'N/runtime', 'N/lo
             }))
         };
     }
-
-    // The Vendor Invoice Lookup Suitelet, which AP invoices link to ("Open in Vendor Lookup"). Script and deployment ids differ
-    // between sandbox and production: update them when this file is promoted. The deployment needs an external URL.
-    const VENDOR_LOOKUP = { script: 1911, deploy: 1 };
 
     function getEntry(params) {
         const id = Number(params.id);

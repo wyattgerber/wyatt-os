@@ -16,7 +16,7 @@ Branch `claude/reporting-lab`. Files are in `SuiteScripts/Reporting/`. Nothing w
 | Schedules | Recipients hidden from users who can't change the schedule. The page, the Suitelet and the engine changed. |
 | Dashboard | New `nts_is_cpm_portlet.js`, plus a dashboard mode on the page (`?dash=1`). The engine was regenerated. |
 
-Run the tests with Node 18 or later. They use mocked `N/*` modules and nothing in `tests/` goes to NetSuite. All 51 pass.
+Run the tests with Node 18 or later. They use mocked `N/*` modules and nothing in `tests/` goes to NetSuite. All 54 pass.
 
 ```
 node --test reporting-lab/tests/*.test.js
@@ -122,6 +122,16 @@ Other ids for reference:
 
 **Found while doing this (not changed)**
 - The schedule form's "The latest closed month" option uses the page's default month, `defaultAsOf()`, which is the month we are **in**, not the last closed one.
+
+## Portability pass (2026-11-18)
+
+- **`nts_is_cpm_sl.js`:** `VENDOR_LOOKUP` uses the text IDs `customscript_vendor_invoice_lookup` / `customdeploy_vendor_invoice_lookup` instead of internal ids 1911 / 1. It moved to the policy-constants block at the top.
+- **`nts_is_cpm_sched.js`:**
+  - The Suitelet defaults are `customscript_nts_reporting_lab` / `customdeploy_nts_reporting_lab`, as the constants `DEFAULT_SL_SCRIPT` and `DEFAULT_SL_DEPLOY`.
+  - The Sender (`custscript_nts_sched_author`) can be an employee internal id or an email address. An email address is looked up among active employees, once per run, and no match or more than one stops the run with a message naming the address.
+  - Adds `N/query`. `BUILD = '2026-11-18a'`.
+- **`nts_is_cpm_page.html`:** `KPI_DEBT` is now 2700, 2720, 2730, 2760 and 2790. It is used only by the KPI Summary's "Total Interest Bearing Debt" row, which feeds "Debt to Equity Ratio" and "Debt to EBITDAE Ratio". Build marker 2026-11-18. The engine was regenerated.
+- **`nts_is_cpm_portlet.js`:** comments only. The production script id is `customscript_report_dashboard`, the sandbox deployment is `customdeploy_report_lab_dashboard`, and the Suitelet is no longer called "the sandbox Suitelet".
 
 ## Not verifiable from the repo
 

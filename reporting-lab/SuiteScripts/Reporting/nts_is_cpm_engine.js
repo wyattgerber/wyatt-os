@@ -2225,7 +2225,9 @@ var __api=(function(){
   // KPI Summary: months roll up into quarters and quarters into years, across the top; the dollar lines each carry their cost per mile.
   //   Rolled up, dollars, miles and working days add; cost per mile, ratios and OR come from the rolled-up totals; trucks in service average.
   //   Cash, debt and equity are the balances at the end of the column. Debt to EBITDAE = debt ÷ EBITDAE for the trailing 12 months.
-  const KPI_DEBT = ['2700','3050','2760','2720','2730','2790','3070','3110'];       // equipment notes, the line of credit and the term loans
+  // Interest-bearing debt, by account number (the same in sandbox and production): equipment notes, the line of credit and the term loans.
+  // Used by the KPI Summary's Total Interest Bearing Debt row, which feeds Debt to Equity Ratio and Debt to EBITDAE Ratio.
+  const KPI_DEBT = ['2700','2720','2730','2760','2790'];
   function kpiLayout(){
     const lines=[]; let c=0; const nc=()=>++c;
     const kids={}; CH.list.forEach(a=>{ (kids[a.parent]=kids[a.parent]||[]).push(a); });
