@@ -1,0 +1,134 @@
+<?xml version="1.0"?>
+<!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">
+<!-- build 2026-11-02 -->
+<!--
+  Nussbaum Reporting Lab — PDF template (income statement with cost per mile, and the balance sheet)
+  Rendered by nts_is_cpm_sl.js (action=pdf). Data source alias: doc
+  Every string arrives already XML-escaped by the Suitelet; do not add ?html here.
+  BFO constraints: tables and cells only, no div elements, explicit align on every cell.
+  ch.single is true for the balance sheet and for reports without a per-mile column: one amount column instead of an amount and a per-mile column.
+  doc.pageSize is the page: Letter-landscape (the default) or Letter (portrait), chosen in the Export menu.
+  doc.z holds the type sizes as text (already scaled when Fit to page was ticked: doc.fitMode is yes); the Suitelet works them out.
+  doc.graphMode is the text "yes" only when the person ticked Include Graph? and the picture was saved; otherwise the statement starts on the first page.
+  ch.span is the columns under each heading: 1 (an amount), 2 (amount and per-mile), 3 or 4 (with one or two extra columns, as the KPI report has). Both are compared as text, which NetSuite's engine reads reliably.
+  The first row of the table is a spacer that fixes each column's width (the amount, per-mile and extra columns each get what their figures and heading need), so the column headings sit centered over their own column.
+  doc.graphPage is set when the person asked for the graph: the address of a temporary PNG (url) and its size in points (w, h). It prints on a page of its own, ahead of the statement.
+-->
+<pdf>
+<head>
+  <macrolist>
+    <macro id="foot">
+      <table width="100%" style="font-size:${doc.z.foot};color:#6B6B6B;">
+        <tr>
+          <td align="left">Nussbaum Reporting Lab · ${doc.title}</td>
+          <td align="right">Printed ${doc.printedAt} by ${doc.printedBy} · Page <pagenumber/> of <totalpages/></td>
+        </tr>
+      </table>
+    </macro>
+  </macrolist>
+  <style type="text/css">
+    body      { font-family: Helvetica, Arial, sans-serif; font-size: ${doc.z.body}; color: #1A1A1A; }
+    table.s   { width: 100%; table-layout: fixed; }
+    td        { padding: ${doc.z.tdp}; vertical-align: top; }
+    td.n      { white-space: nowrap; }
+    td.m      { white-space: nowrap; color: #6E7379; }
+    td.neg    { color: #8C1D18; }
+    tr.hm td  { font-size: ${doc.z.hm}; font-weight: bold; text-align: center; padding-top: ${doc.z.hmpad}; padding-bottom: ${doc.z.hmpb}; }
+    tr.hc td  { font-size: ${doc.z.hc}; font-weight: bold; text-align: center; color: #1A1A1A; border-bottom: 1pt solid #1A1A1A; }
+    tr.sec td { font-weight: bold; font-size: ${doc.z.sec}; padding-top: ${doc.z.secpad}; border-bottom: 0.5pt solid #D9D9D9; }
+    tr.det td { color: #4A4F55; font-size: ${doc.z.det}; padding-top: ${doc.z.detp}; padding-bottom: ${doc.z.detp}; }
+    tr.par td { color: #1A1A1A; font-size: ${doc.z.par}; font-weight: bold; padding-top: ${doc.z.parpt}; padding-bottom: ${doc.z.detp}; }
+    tr.tot td { font-weight: bold; border-top: 0.5pt solid #9AA0A8; padding-top: ${doc.z.totpt}; }
+    tr.ratio td { background-color: #F4F4F4; font-weight: bold; }
+    tr.grand td { font-weight: bold; font-size: ${doc.z.grand}; border-top: 1.5pt solid #1A1A1A; padding-top: ${doc.z.grandpt}; }
+  </style>
+</head>
+<body size="${doc.pageSize}" padding="${doc.z.page}" footer="foot" footer-height="14pt">
+
+<#if (doc.graphMode!"no") == "yes">
+  <table width="100%" style="margin-bottom:5pt;">
+    <tr><td align="left" style="background-color:#EE3124;height:5pt;padding:0;">&nbsp;</td></tr>
+  </table>
+  <table width="100%" style="margin-bottom:6pt;">
+    <tr><td align="center" style="font-size:14pt;font-weight:bold;">NUSSBAUM TRANSPORTATION · ${doc.title}</td></tr>
+    <tr><td align="center" style="font-size:11pt;font-weight:bold;color:#EE3124;">Graph</td></tr>
+  </table>
+  <table width="100%">
+    <tr><td align="center"><img src="${doc.graphPage.url}" width="${doc.graphPage.w}pt" height="${doc.graphPage.h}pt"/></td></tr>
+  </table>
+  <pbr/>
+</#if>
+
+<#list doc.sections as sec>
+<#list sec.chunks as ch>
+  <table width="100%" style="margin-bottom:${doc.z.gap5};">
+    <tr><td align="left" style="background-color:#EE3124;height:${doc.z.bar};padding:0;">&nbsp;</td></tr>
+  </table>
+  <table width="100%" style="margin-bottom:${doc.z.gap6};">
+    <tr>
+      <td align="center" style="font-size:${doc.z.t16};font-weight:bold;">NUSSBAUM TRANSPORTATION · ${doc.title}</td>
+    </tr>
+    <#if sec.title?has_content>
+    <tr>
+      <td align="center" style="font-size:${doc.z.t11};font-weight:bold;color:#EE3124;">${sec.title}</td>
+    </tr>
+    </#if>
+    <#if doc.note?has_content>
+    <tr>
+      <td align="center" style="font-size:${doc.z.t75};color:#6B6B6B;">${doc.note}</td>
+    </tr>
+    </#if>
+    <#if ch.part?has_content>
+    <tr>
+      <td align="center" style="font-size:${doc.z.t75};color:#6B6B6B;">${ch.part}</td>
+    </tr>
+    </#if>
+  </table>
+
+  <table class="s">
+    <thead>
+      <tr>
+        <td width="${ch.labelW}" style="padding:0;font-size:1pt;"></td>
+        <#list ch.heads as h>
+          <td width="${ch.aW}" style="padding:0;font-size:1pt;"></td>
+          <#if ch.span?string != "1"><td width="${ch.mW}" style="padding:0;font-size:1pt;"></td></#if>
+          <#if ch.span?string == "3" || ch.span?string == "4"><td width="${ch.x1W}" style="padding:0;font-size:1pt;"></td></#if>
+          <#if ch.span?string == "4"><td width="${ch.x2W}" style="padding:0;font-size:1pt;"></td></#if>
+        </#list>
+      </tr>
+      <tr class="hm">
+        <td align="left" width="${ch.labelW}" style="text-align:left;">&nbsp;</td>
+        <#list ch.heads as h>
+          <td align="center" colspan="${ch.span}" width="${ch.pairW}" style="text-align:center;padding-left:${ch.hpad}pt;">${h.label}</td>
+        </#list>
+      </tr>
+      <tr class="hc">
+        <td align="left" width="${ch.labelW}" style="text-align:left;">Account</td>
+        <#list ch.heads as h>
+          <td align="center" width="${ch.aW}" style="text-align:center;">${h.a}</td>
+          <#if ch.span?string != "1"><td align="center" width="${ch.mW}" style="text-align:center;">${h.m}</td></#if>
+          <#if ch.span?string == "3" || ch.span?string == "4"><td align="center" width="${ch.x1W}" style="text-align:center;">${h.x1?replace(" ", "<br/>")}</td></#if>
+          <#if ch.span?string == "4"><td align="center" width="${ch.x2W}" style="text-align:center;">${h.x2?replace(" ", "<br/>")}</td></#if>
+        </#list>
+      </tr>
+    </thead>
+    <tbody>
+      <#list ch.rows as r>
+        <tr class="${r.kind}">
+          <td align="left" style="padding-left:${r.pad}pt;">${r.label}</td>
+          <#list r.cells as c>
+            <td align="right" class="n<#if c.neg> neg</#if>">${c.a}</td>
+            <#if ch.span?string != "1"><td align="right" class="m<#if c.neg> neg</#if>">${c.m}</td></#if>
+            <#if ch.span?string == "3" || ch.span?string == "4"><td align="right" class="n">${c.x1}</td></#if>
+            <#if ch.span?string == "4"><td align="right" class="n">${c.x2}</td></#if>
+          </#list>
+        </tr>
+      </#list>
+    </tbody>
+  </table>
+  <#if ch?has_next || sec?has_next><pbr/></#if>
+</#list>
+</#list>
+
+</body>
+</pdf>
