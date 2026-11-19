@@ -399,6 +399,29 @@ function (search, file, record, query, runtime, format, crypto, encode, log, url
     var FLD_ACCESS = 'custentity_vendor_invoice_access';
     var FLD_CODE   = 'custentity_vendor_invoice_passcode';
 
+    // WHAT EACH PERSON MAY SEE, also set on the employee record (re-read on every request, so a
+    // change takes effect on the person's next click):
+    //   custentity_vendor_invoice_subs    Multiple Select, List/Record = Subsidiary
+    //       the subsidiaries whose vendor bills they see (the bill's own subsidiary)
+    //   custentity_vendor_invoice_groups  Multiple Select, List/Record = Vendor Category
+    //       which of the AP / TMT groups (VENDOR_GROUPS) they see. A custom list, or a text
+    //       field such as "AP, TMT", also works: values are matched to each group's category,
+    //       key, label or name.
+    // A person limited to some subsidiaries or one group sees only those invoices everywhere:
+    // search, type-ahead, vendor and invoice pages, both Missing tabs and their badges, document
+    // links, uploads and attaches. To them, an invoice outside their access does not exist. Of the
+    // PDFs waiting for an invoice they see the ones they uploaded, plus any whose order # matches
+    // an invoice they can see.
+    // The fields must exist in the account (like the two above): if they are missing, sign-in
+    // says it is not available. Set a field ID to '' to switch that limit off for everyone.
+    var FLD_SUBS   = 'custentity_vendor_invoice_subs';
+    var FLD_GROUPS = 'custentity_vendor_invoice_groups';
+
+    // What a blank field means:
+    //   true  = no limit (everything), so people keep working until they are given a limit
+    //   false = nothing; every person must be given subsidiaries and groups before they see invoices
+    var SCOPE_BLANK_MEANS_ALL = true;
+
     // Any random string. Changing it signs everyone out immediately.
     var COOKIE_SECRET = 'CHANGE-ME-TO-ANYTHING-RANDOM';
 
@@ -417,6 +440,9 @@ function (search, file, record, query, runtime, format, crypto, encode, log, url
     var LOGIN_UNAVAILABLE = 'Sign-in is not available right now. Please tell IT or Accounting.';
     var AUTH_CAN_UPLOAD = true;   // set per request from the employee record
     var AUTH_NS = false;          // this person can log in to NetSuite (employee Give Access)
+    var AUTH_SCOPE = null;        // { subs: [ids] or null (all), subNames, groupTokens } for the signed-in person
+    var ALLOWED_GROUPS = null;    // group keys this person may see, worked out once per request
+    var VENDOR_SUB_SIMPLE = false; // set when NetSuite refuses the vendor-subsidiary table; then the vendor's primary subsidiary is used
     var TAB = 'search';           // which tab the page being built belongs to
     var HAS_DROP = false;         // this page has invoice rows that accept a dropped PDF
     var HAS_UNIT = false;         // this page has unit # cells that can be edited
@@ -702,6 +728,8 @@ border:1px solid var(--card-border);border-radius:4px;box-shadow:0 4px 12px rgba
 font-family:var(--font-display);font-weight:400;font-size:14px;letter-spacing:.06em;text-transform:uppercase}
 .nb-seg button:hover{background:var(--bg-3)}
 .nb-seg button[aria-pressed="true"]{background:var(--fg-1);color:var(--bg-1);font-weight:700}
+.nb-accesshead{margin-top:16px}
+.nb-access{margin-top:4px;color:var(--fg-2)}
 
 .nb-overline{font-family:var(--font-display);font-weight:700;font-size:12px;line-height:1.3;letter-spacing:.18em;
 text-transform:uppercase;color:var(--fg-accent)}
@@ -1751,7 +1779,7 @@ window.NbPdf={open:open,bake:bake};
              + '<div class="nb-seg" role="group" aria-label="Appearance">'
              + '<button type="button" data-theme="light" aria-pressed="false">Light</button>'
              + '<button type="button" data-theme="dark" aria-pressed="true">Dark</button>'
-             + '</div></div></div>'
+             + '</div>' + accessSummaryHtml() + '</div></div>'
              + '</div></header>';
     }
 
@@ -1762,6 +1790,11 @@ window.NbPdf={open:open,bake:bake};
         if (PENDING_COUNT !== null) return PENDING_COUNT;
         PENDING_COUNT = 0;
         try {
+            // Someone with limited access counts only the waiting PDFs they can see.
+            if (scoped()) {
+                PENDING_COUNT = filterDocs(docRows('PENDING', MAX_QUEUE, false)).length;
+                return PENDING_COUNT;
+            }
             var rows = query.runSuiteQL({
                 query: 'SELECT COUNT(*) AS n FROM file WHERE description LIKE ?',
                 params: [DOC_MARK + 'PENDING|%']
@@ -1780,7 +1813,7 @@ window.NbPdf={open:open,bake:bake};
 
     /** Switches to another group (a link led to a vendor or invoice of that group) and remembers it. */
     function followGroup(res, key) {
-        if (!key || key === GROUP) return;
+        if (!key || key === GROUP || allowedGroupKeys().indexOf(key) < 0) return;
         log.audit({ title: 'vendor group followed', details: AUTH_USER + ' ' + GROUP + ' -> ' + key + ' (link to a record of that group)' });
         GROUP = key;
         MISSING_COUNT = null;
@@ -1800,9 +1833,188 @@ window.NbPdf={open:open,bake:bake};
         }
     }
 
+    // ---------- access scope (FLD_SUBS / FLD_GROUPS) ----------
+
+    /** A multi-select value from a search result ("3,5", [3,5] or text) as a list of trimmed strings. */
+    function valueList(v) {
+        if (v === null || v === undefined) return [];
+        var list = Array.isArray(v) ? v : String(v).split(/[,\u0005]/);
+        return list.map(function (x) { return String(x).trim(); }).filter(Boolean);
+    }
+
+    /** The scope stored on an employee search result. */
+    function scopeFromRow(r) {
+        var out = { subs: null, subNames: [], groupTokens: null };
+        if (FLD_SUBS) {
+            var ids = valueList(r.getValue(FLD_SUBS)).map(Number).filter(function (n) { return n > 0; });
+            try { out.subNames = valueList(r.getText(FLD_SUBS)); } catch (e) { out.subNames = []; }
+            out.subs = ids.length ? ids : (SCOPE_BLANK_MEANS_ALL ? null : []);
+        }
+        if (FLD_GROUPS) {
+            var tokens = valueList(r.getValue(FLD_GROUPS));
+            try { tokens = tokens.concat(valueList(r.getText(FLD_GROUPS))); } catch (e) { /* not a list field */ }
+            out.groupTokens = tokens;
+        }
+        return out;
+    }
+
+    /** Subsidiary ids this person is limited to, or null for every subsidiary. */
+    function scopeSubs() {
+        return (REQUIRE_LOGIN && AUTH_SCOPE && AUTH_SCOPE.subs) ? AUTH_SCOPE.subs : null;
+    }
+
+    /** The group keys (VENDOR_GROUPS) this person may see, in VENDOR_GROUPS order. */
+    function allowedGroupKeys() {
+        if (ALLOWED_GROUPS !== null) return ALLOWED_GROUPS;
+        var all = VENDOR_GROUPS.map(function (g) { return g.key; });
+        var tokens = (REQUIRE_LOGIN && AUTH_SCOPE && FLD_GROUPS) ? AUTH_SCOPE.groupTokens : null;
+        if (!tokens) { ALLOWED_GROUPS = all; return all; }
+        if (!tokens.length) { ALLOWED_GROUPS = SCOPE_BLANK_MEANS_ALL ? all : []; return ALLOWED_GROUPS; }
+        var up = tokens.map(function (t) { return t.toUpperCase(); });
+        ALLOWED_GROUPS = VENDOR_GROUPS.filter(function (g) {
+            if (up.indexOf(String(g.key).toUpperCase()) >= 0 || up.indexOf(String(g.label).toUpperCase()) >= 0
+                    || up.indexOf(String(g.name).toUpperCase()) >= 0) return true;
+            try { return up.indexOf(String(groupCategoryId(g.key))) >= 0; } catch (e) { return false; }
+        }).map(function (g) { return g.key; });
+        return ALLOWED_GROUPS;
+    }
+
+    function groupsLimited() { return allowedGroupKeys().length < VENDOR_GROUPS.length; }
+
+    /** Is this person limited in any way? (Everyone else gets exactly the behaviour from before.) */
+    function scoped() { return !!scopeSubs() || groupsLimited(); }
+
+    /** True when the person's access covers nothing at all. */
+    function scopeEmpty() {
+        var s = scopeSubs();
+        return (!!s && !s.length) || !allowedGroupKeys().length;
+    }
+
+    function qmarks(n) { var a = []; for (var i = 0; i < n; i++) a.push('?'); return a.join(', '); }
+
+    /**
+     * SuiteQL that keeps only vendor bills this person may see. billAlias is the transaction
+     * alias; vendorAlias the joined vendor (for the group limit), or '' when the query already
+     * limits the vendor category to the group in effect. Returns { sql, params }.
+     */
+    function scopeSql(billAlias, vendorAlias) {
+        var sql = '', params = [];
+        var subs = scopeSubs();
+        if (subs) {
+            if (!subs.length) return { sql: ' AND 1 = 0', params: [] };
+            sql += ' AND EXISTS (SELECT 1 FROM transactionline stl WHERE stl.transaction = ' + billAlias + ".id AND stl.mainline = 'T'"
+                 + ' AND stl.subsidiary IN (' + qmarks(subs.length) + '))';
+            params = params.concat(subs);
+        }
+        if (vendorAlias && groupsLimited()) {
+            var cats = allowedGroupKeys().map(groupCategoryId);
+            if (!cats.length) return { sql: ' AND 1 = 0', params: [] };
+            sql += ' AND ' + vendorAlias + '.category IN (' + qmarks(cats.length) + ')';
+            params = params.concat(cats);
+        }
+        return { sql: sql, params: params };
+    }
+
+    /** Of these vendor bill ids, the ones this person may see: { id: true }. */
+    function visibleBillIds(ids) {
+        var out = {};
+        ids = ids.map(Number).filter(function (n) { return n > 0; });
+        if (!ids.length) return out;
+        if (!scoped()) {
+            ids.forEach(function (id) { out[id] = true; });
+            return out;
+        }
+        var sc = scopeSql('t', 'v');
+        query.runSuiteQL({
+            query: 'SELECT t.id AS id FROM transaction t LEFT JOIN vendor v ON v.id = t.entity '
+                 + "WHERE t.type = 'VendBill' AND t.id IN (" + qmarks(ids.length) + ')' + sc.sql,
+            params: ids.concat(sc.params)
+        }).asMappedResults().forEach(function (r) { out[Number(r.id)] = true; });
+        return out;
+    }
+
+    function billVisible(id) {
+        return /^\d+$/.test(String(id || '')) && !!visibleBillIds([Number(id)])[Number(id)];
+    }
+
+    /**
+     * Vendor subsidiary limit for a query on the vendor table (alias a): the vendor's primary
+     * subsidiary or any subsidiary it is shared with. Returns { sql, params }.
+     */
+    function vendorSubSql(a) {
+        var subs = scopeSubs();
+        if (!subs) return { sql: '', params: [] };
+        if (!subs.length) return { sql: ' AND 1 = 0', params: [] };
+        if (VENDOR_SUB_SIMPLE) return { sql: ' AND ' + a + '.subsidiary IN (' + qmarks(subs.length) + ')', params: subs.slice() };
+        return {
+            sql: ' AND (' + a + '.subsidiary IN (' + qmarks(subs.length) + ') OR EXISTS (SELECT 1 FROM vendorsubsidiaryrelationship vsr '
+               + 'WHERE vsr.entity = ' + a + '.id AND vsr.subsidiary IN (' + qmarks(subs.length) + ')))',
+            params: subs.concat(subs)
+        };
+    }
+
+    /** Runs a vendor query built by fn(); if NetSuite refuses the vendor-subsidiary table, logs it and uses the primary subsidiary only. */
+    function withVendorSubs(fn) {
+        try {
+            return fn();
+        } catch (e) {
+            if (VENDOR_SUB_SIMPLE || !scopeSubs()) throw e;
+            log.error({ title: 'vendor subsidiary filter failed', details: e.name + ': ' + e.message });
+            VENDOR_SUB_SIMPLE = true;
+            return fn();
+        }
+    }
+
+    /** Of these vendor ids, the ones inside this person's subsidiaries: { id: true }. */
+    function visibleVendorIds(ids) {
+        var out = {};
+        ids = ids.map(Number).filter(function (n) { return n > 0; });
+        if (!ids.length) return out;
+        if (!scopeSubs()) { ids.forEach(function (id) { out[id] = true; }); return out; }
+        withVendorSubs(function () {
+            var vs = vendorSubSql('vnd');
+            return query.runSuiteQL({
+                query: 'SELECT vnd.id AS id FROM vendor vnd WHERE vnd.id IN (' + qmarks(ids.length) + ')' + vs.sql,
+                params: ids.concat(vs.params)
+            }).asMappedResults();
+        }).forEach(function (r) { out[Number(r.id)] = true; });
+        return out;
+    }
+
+    /**
+     * Uploaded PDFs (rows with order, by, bill) this person may see: their own, ones attached
+     * to an invoice they can see, and waiting ones whose order # matches an invoice they can see.
+     */
+    function filterDocs(rows) {
+        if (!scoped()) return rows;
+        var me = safeText(AUTH_USER);
+        var others = rows.filter(function (r) { return r.by !== me; });
+        var okBills = visibleBillIds(others.filter(function (r) { return r.bill; }).map(function (r) { return Number(r.bill); }));
+        var seen = {}, orders = [];
+        others.forEach(function (r) { if (!r.bill && r.order && !seen[r.order]) { seen[r.order] = 1; orders.push(r.order); } });
+        var byOrder = billsByOrder(orders);
+        return rows.filter(function (r) {
+            if (r.by === me) return true;
+            if (r.bill) return !!okBills[Number(r.bill)];
+            return (byOrder[r.order] || []).length > 0;
+        });
+    }
+
+    /** What the settings menu shows under "Your access". */
+    function accessSummaryHtml() {
+        if (!REQUIRE_LOGIN || !AUTH_USER || !AUTH_SCOPE) return '';
+        var groups = allowedGroupKeys().map(function (k) { return groupDef(k).label; });
+        var subs = scopeSubs();
+        return '<div class="nb-label nb-accesshead">Your access</div>'
+             + '<p class="nb-help nb-access">' + esc(groups.length ? groups.join(' and ') + ' invoices' : 'No invoices')
+             + '<br>' + (subs ? (subs.length ? 'Subsidiaries: ' + esc((AUTH_SCOPE.subNames.length ? AUTH_SCOPE.subNames : subs).join(', ')) : 'No subsidiaries')
+                              : 'All subsidiaries') + '</p>';
+    }
+
     /** The AP / TMT toggle: a link for each group, the one in effect marked. */
     function groupToggleHtml() {
-        var opts = VENDOR_GROUPS.map(function (g) {
+        var mine = allowedGroupKeys();
+        var opts = VENDOR_GROUPS.filter(function (g) { return mine.indexOf(g.key) >= 0; }).map(function (g) {
             var on = g.key === GROUP;
             return '<a class="nb-grp__opt' + (on ? ' is-active' : '') + '" href="' + esc(GROUP_BASE + '&group=' + encodeURIComponent(g.key)) + '"'
                  + ' data-group="' + esc(g.key) + '"'
@@ -1816,7 +2028,7 @@ window.NbPdf={open:open,bake:bake};
     function groupErrorPage(msg) {
         GROUP_UI = false;
         var d = groupDef(GROUP);
-        var others = VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP; }).map(function (g) {
+        var others = VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP && allowedGroupKeys().indexOf(g.key) >= 0; }).map(function (g) {
             return '<a class="nb-btn nb-btn--secondary" href="' + esc(self() + '&group=' + encodeURIComponent(g.key)) + '">Show ' + esc(g.label) + ' invoices</a>';
         }).join(' ');
         return page('<div class="nb-overline">Setup needed</div>'
@@ -2040,6 +2252,8 @@ document.addEventListener("click",function(ev){
     function employeeColumns() {
         var cols = ['entityid', 'email', FLD_CODE, 'giveaccess'];
         if (REQUIRE_UPLOAD_FLAG) cols.push(FLD_UPLOAD);
+        if (FLD_SUBS) cols.push(FLD_SUBS);
+        if (FLD_GROUPS) cols.push(FLD_GROUPS);
         return cols;
     }
 
@@ -2055,7 +2269,8 @@ document.addEventListener("click",function(ev){
             email: r.getValue('email'),
             code: r.getValue(FLD_CODE) || '',
             canUpload: up,
-            netsuite: (r.getValue('giveaccess') === true || r.getValue('giveaccess') === 'T')
+            netsuite: (r.getValue('giveaccess') === true || r.getValue('giveaccess') === 'T'),
+            scope: scopeFromRow(r)
         };
     }
 
@@ -2128,6 +2343,7 @@ document.addEventListener("click",function(ev){
         if (sign(emp.id, emp.code) !== sig) return '';
         AUTH_CAN_UPLOAD = emp.canUpload;
         AUTH_NS = emp.netsuite;
+        AUTH_SCOPE = emp.scope;
         return emp.name || emp.email;
     }
 
@@ -2336,16 +2552,20 @@ document.addEventListener("click",function(ev){
         // ROWNUM cut (exact matches first), and the outer one restores that order,
         // because a plain SELECT * around a subquery does not preserve it.
         var rank = 'CASE WHEN UPPER(entityid) = ? OR UPPER(companyname) = ? THEN 0 ELSE 1 END';
-        return query.runSuiteQL({
-            query: 'SELECT id, entityid, companyname FROM (SELECT * FROM ('
-                 + 'SELECT id, entityid, companyname, ' + rank + ' AS rnk FROM vendor '
-                 + 'WHERE NVL(isinactive, \'F\') = \'F\' '
-                 + 'AND (UPPER(entityid) LIKE ? OR UPPER(companyname) LIKE ?) '
-                 + 'AND category = ? '
-                 + 'ORDER BY rnk, entityid'
-                 + ') WHERE ROWNUM <= ' + Number(limit) + ') ORDER BY rnk, entityid',
-            params: [up, up, like, like, groupCategoryId(GROUP)]
-        }).asMappedResults();
+        // Limited to this person's subsidiaries when FLD_SUBS says so (nothing added otherwise).
+        return withVendorSubs(function () {
+            var vs = vendorSubSql('vnd');
+            return query.runSuiteQL({
+                query: 'SELECT id, entityid, companyname FROM (SELECT * FROM ('
+                     + 'SELECT id, entityid, companyname, ' + rank + ' AS rnk FROM vendor' + (vs.sql ? ' vnd' : '') + ' '
+                     + 'WHERE NVL(isinactive, \'F\') = \'F\' '
+                     + 'AND (UPPER(entityid) LIKE ? OR UPPER(companyname) LIKE ?) '
+                     + 'AND category = ?' + vs.sql + ' '
+                     + 'ORDER BY rnk, entityid'
+                     + ') WHERE ROWNUM <= ' + Number(limit) + ') ORDER BY rnk, entityid',
+                params: [up, up, like, like, groupCategoryId(GROUP)].concat(vs.params)
+            }).asMappedResults();
+        });
     }
 
     /** Legacy vendor-only suggestions ({e, n}). */
@@ -2395,6 +2615,7 @@ document.addEventListener("click",function(ev){
         offset = offset || 0;
         opts = opts || {};
         var vendorSql = (opts.vendorId ? ' AND t.entity = ?' : '') + ' AND v.category = ?';
+        var scope = scopeSql('t', '');   // the group is already v.category = GROUP, one this person may see
         var cols = 't.id AS id, t.tranid AS tranid, t.externalid AS externalid, t.otherrefnum AS otherrefnum, '
                  + 't.trandate AS trandate, v.entityid AS vendorid, v.companyname AS vendorname'
                  + (UNIT_COL ? ', t.' + UNIT_COL + ' AS unit' : '');
@@ -2415,16 +2636,18 @@ document.addEventListener("click",function(ev){
             likes.forEach(function () { params.push(like); });
             if (opts.vendorId) params.push(Number(opts.vendorId));
             params.push(groupCategoryId(GROUP));
+            params = params.concat(scope.params);
 
             // Best matches first, unless the person chose a column to sort by.
             inner = 'SELECT ' + cols + ', CASE WHEN ' + eqs.join(' OR ') + ' THEN 0 ELSE 1 END AS rnk '
-                  + from + "WHERE t.type = 'VendBill' AND (" + likes.join(' OR ') + ')' + vendorSql + dateSql()
+                  + from + "WHERE t.type = 'VendBill' AND (" + likes.join(' OR ') + ')' + vendorSql + scope.sql + dateSql()
                   + ' ORDER BY ' + (opts.sort ? sqlOrderBy(opts.sort) : 'rnk, t.trandate DESC, t.id DESC');
         } else {
             // No search text: every bill in the date range (or of one vendor), newest first unless sorted.
             if (opts.vendorId) params.push(Number(opts.vendorId));
             params.push(groupCategoryId(GROUP));
-            inner = 'SELECT ' + cols + ' ' + from + "WHERE t.type = 'VendBill'" + vendorSql + dateSql()
+            params = params.concat(scope.params);
+            inner = 'SELECT ' + cols + ' ' + from + "WHERE t.type = 'VendBill'" + vendorSql + scope.sql + dateSql()
                   + ' ORDER BY ' + sqlOrderBy(opts.sort);
         }
 
@@ -2463,6 +2686,9 @@ document.addEventListener("click",function(ev){
         if (opts.vendorId) { where += ' AND t.entity = ?'; params.push(Number(opts.vendorId)); }
         where += ' AND v.category = ?';
         params.push(groupCategoryId(GROUP));
+        var scope = scopeSql('t', '');
+        where += scope.sql;
+        params = params.concat(scope.params);
         var rows = query.runSuiteQL({
             query: 'SELECT COUNT(*) AS n FROM transaction t LEFT JOIN vendor v ON v.id = t.entity WHERE ' + where + dateSql(),
             params: params
@@ -2520,6 +2746,10 @@ document.addEventListener("click",function(ev){
             });
             return out.length < 10;
         });
+        if (scopeSubs() && out.length) {
+            var ok = visibleVendorIds(out.map(function (v) { return v.id; }));
+            out = out.filter(function (v) { return ok[Number(v.id)]; });
+        }
         return out;
     }
 
@@ -2608,9 +2838,11 @@ document.addEventListener("click",function(ev){
     function loadBillsByIds(ids) {
         var out = [];
         if (!ids.length) return out;
+        var filters = [['mainline', 'is', 'T'], 'AND', ['internalid', 'anyof', ids]];
+        if (scopeSubs()) filters.push('AND', ['subsidiary', 'anyof', scopeSubs().length ? scopeSubs() : ['@NONE@']]);
         search.create({
             type: 'vendorbill',
-            filters: [['mainline', 'is', 'T'], 'AND', ['internalid', 'anyof', ids]],
+            filters: filters,
             columns: billColumns()
         }).run().each(function (r) {
             out.push(mapBill(r));
@@ -2798,11 +3030,13 @@ document.addEventListener("click",function(ev){
         var map = {};
         if (!orders.length) return map;
         var marks = orders.map(function () { return '?'; }).join(',');
+        // For a person with limited access, invoices outside it are left out (they do not exist for them).
+        var scope = scopeSql('t', 'v');
         query.runSuiteQL({
             query: "SELECT t.id AS id, t.tranid AS tranid, v.entityid AS vendorid "
                  + "FROM transaction t LEFT JOIN vendor v ON v.id = t.entity "
-                 + "WHERE t.type = 'VendBill' AND UPPER(t.tranid) IN (" + marks + ')',
-            params: orders
+                 + "WHERE t.type = 'VendBill' AND UPPER(t.tranid) IN (" + marks + ')' + scope.sql,
+            params: orders.concat(scope.params)
         }).asMappedResults().forEach(function (r) {
             var k = normOrder(r.tranid);
             (map[k] = map[k] || []).push({ id: Number(r.id), tranid: r.tranid, vendorid: r.vendorid || '' });
@@ -2899,7 +3133,7 @@ document.addEventListener("click",function(ev){
         if (!up) return [];
         var like = '%' + up + '%';
 
-        return query.runSuiteQL({
+        var rows = query.runSuiteQL({
             query: 'SELECT id, name, description, createddate FROM ('
                  + 'SELECT id, name, description, createddate FROM file WHERE description LIKE ? '
                  + 'AND (UPPER(description) LIKE ? OR UPPER(name) LIKE ?) ORDER BY id DESC'
@@ -2914,6 +3148,7 @@ document.addEventListener("click",function(ev){
             return r.order && (r.order.indexOf(up) >= 0 || r.unit.toUpperCase().indexOf(up) >= 0
                             || r.name.toUpperCase().indexOf(up) >= 0);
         });
+        return filterDocs(rows);
     }
 
     /** One of our files by id, parsed; null for anything else (so nothing else can be touched). */
@@ -2935,7 +3170,7 @@ document.addEventListener("click",function(ev){
      * is right even if the bill-save script missed one.
      */
     function loadQueue() {
-        var rows = docRows('PENDING', MAX_QUEUE, false);
+        var rows = filterDocs(docRows('PENDING', MAX_QUEUE, false));
         var seen = {}, orders = [];
         rows.forEach(function (r) { if (!seen[r.order]) { seen[r.order] = 1; orders.push(r.order); } });
         var bills = billsByOrder(orders);
@@ -3055,7 +3290,7 @@ document.addEventListener("click",function(ev){
                 query: "SELECT id, tranid FROM transaction WHERE id = ? AND type = 'VendBill'",
                 params: [Number(billId)]
             }).asMappedResults()[0] : null;
-            if (!bill) return jsonOut(res, { ok: false, error: 'We could not find that invoice.' });
+            if (!bill || !billVisible(bill.id)) return jsonOut(res, { ok: false, error: 'We could not find that invoice.' });
 
             var data = String(req.parameters.data || '');
             if (data.indexOf('JVBERi') !== 0) {
@@ -3114,7 +3349,7 @@ document.addEventListener("click",function(ev){
                 query: 'SELECT id, tranid, ' + UNIT_COL + " AS unit FROM transaction WHERE id = ? AND type = 'VendBill'",
                 params: [Number(billId)]
             }).asMappedResults()[0] : null;
-            if (!row) return jsonOut(res, { ok: false, error: 'We could not find that invoice.' });
+            if (!row || !billVisible(row.id)) return jsonOut(res, { ok: false, error: 'We could not find that invoice.' });
 
             var unit = normOrder(req.parameters.unit);          // empty means clear it
             if (unit && !validUnit(unit)) {
@@ -3152,7 +3387,7 @@ document.addEventListener("click",function(ev){
 
         try {
             var d = loadDoc(req.parameters.id);
-            if (!d || d.state !== 'PENDING') {
+            if (!d || d.state !== 'PENDING' || !filterDocs([d]).length) {
                 return jsonOut(res, { ok: false, error: 'That PDF is no longer waiting for an invoice.' });
             }
             var order = normOrder(req.parameters.order);
@@ -3205,7 +3440,7 @@ document.addEventListener("click",function(ev){
 
         try {
             var d = loadDoc(req.parameters.id);
-            if (!d || d.state !== 'PENDING') {
+            if (!d || d.state !== 'PENDING' || !filterDocs([d]).length) {
                 return jsonOut(res, { ok: false, error: 'That PDF is no longer waiting for an invoice.' });
             }
             file.delete({ id: d.id });
@@ -3499,8 +3734,11 @@ document.addEventListener("click",function(ev){
         } else {
             inGroup = ['vendor.category', 'anyof', groupCategoryId(GROUP)];
         }
-        return [['mainline', 'is', 'T'], 'AND', ['type', 'anyof', 'VendBill'],
-                'AND', ['file.internalid', 'anyof', '@NONE@'], 'AND', inGroup];
+        var out = [['mainline', 'is', 'T'], 'AND', ['type', 'anyof', 'VendBill'],
+                   'AND', ['file.internalid', 'anyof', '@NONE@'], 'AND', inGroup];
+        var subs = scopeSubs();
+        if (subs) out.push('AND', ['subsidiary', 'anyof', subs.length ? subs : ['@NONE@']]);
+        return out;
     }
 
     /**
@@ -3535,8 +3773,10 @@ document.addEventListener("click",function(ev){
         MISSING_COUNT = 0;
         try {
             var c = cache.getCache({ name: MISSING_CACHE, scope: cache.Scope.PRIVATE });
+            var gen = c.get({ key: MISSING_KEY + ':gen', ttl: MISSING_COUNT_TTL * 12, loader: function () { return '0'; } });
+            var subs = scopeSubs();
             MISSING_COUNT = Number(c.get({
-                key: MISSING_KEY + ':' + GROUP,
+                key: MISSING_KEY + ':' + gen + ':' + GROUP + ':' + (subs ? subs.slice().sort(function (a, b) { return a - b; }).join('-') : 'all'),
                 ttl: MISSING_COUNT_TTL,
                 loader: function () { return String(countMissingNow()); }
             })) || 0;
@@ -3551,8 +3791,9 @@ document.addEventListener("click",function(ev){
     /** Forget the remembered number, after a PDF was attached through the lookup. */
     function forgetMissingCount() {
         try {
+            // Each group and each set of subsidiaries has its own number, so start a new generation.
             var c = cache.getCache({ name: MISSING_CACHE, scope: cache.Scope.PRIVATE });
-            VENDOR_GROUPS.forEach(function (g) { c.remove({ key: MISSING_KEY + ':' + g.key }); });
+            c.put({ key: MISSING_KEY + ':gen', value: String(new Date().getTime()), ttl: MISSING_COUNT_TTL * 12 });
         } catch (e) { /* not worth failing an attach over */ }
     }
 
@@ -3936,6 +4177,9 @@ document.addEventListener("click",function(e){
         // permissions, a stale queue count) can carry over.
         AUTH_CAN_UPLOAD = true;
         AUTH_NS = false;
+        AUTH_SCOPE = null;
+        ALLOWED_GROUPS = null;
+        VENDOR_SUB_SIMPLE = false;
         NS_HOST = null;
         MISSING_COUNT = null;
         SCAN_FOLDER_IDS = null;
@@ -4014,7 +4258,7 @@ document.addEventListener("click",function(e){
         // this browser saved, else the default. A choice made in the address is saved.
         var picked = pickGroup(req);
         GROUP = picked.key;
-        if (picked.chosen && cookieValue(req, GROUP_COOKIE_NAME).toUpperCase() !== GROUP) setGroupCookie(res, GROUP);
+        var groupChosen = picked.chosen;
 
         // Logged on EVERY request, including a bare page load. Without this, an
         // empty execution log is ambiguous: it could mean the request was
@@ -4099,6 +4343,7 @@ document.addEventListener("click",function(e){
                 AUTH_USER = pwEmp.name || pwEmp.email;
                 AUTH_CAN_UPLOAD = pwEmp.canUpload;
                 AUTH_NS = pwEmp.netsuite;
+                AUTH_SCOPE = pwEmp.scope;
                 log.audit({ title: 'passcode set', details: AUTH_USER + ' from ' + req.clientIpAddress + (replacingTemp ? ' (replaced a temporary passcode)' : '') });
             }
 
@@ -4139,6 +4384,7 @@ document.addEventListener("click",function(e){
                 AUTH_USER = emp.name || emp.email;
                 AUTH_CAN_UPLOAD = emp.canUpload;
                 AUTH_NS = emp.netsuite;
+                AUTH_SCOPE = emp.scope;
                 log.audit({ title: 'signed in', details: AUTH_USER + ' from ' + req.clientIpAddress });
             }
 
@@ -4147,6 +4393,27 @@ document.addEventListener("click",function(e){
                 return;
             }
         }
+
+        // --- what this person may see (FLD_SUBS / FLD_GROUPS) ---
+        if (scopeEmpty()) {
+            log.audit({ title: 'no invoice access', details: AUTH_USER + ' signed in but has no subsidiaries or groups' });
+            if (req.parameters.mode && req.parameters.mode !== 'page') {
+                res.setHeader({ name: 'Content-Type', value: 'application/json' });
+                res.write(JSON.stringify({ ok: false, error: 'Your access does not include any invoices yet.' }));
+            } else {
+                res.write(page('<div class="nb-overline">Access</div>'
+                             + '<h1 class="nb-headline nb-h2">You do not have access to any invoices yet.</h1>'
+                             + '<p class="nb-lead">Your sign-in works, but no subsidiaries or invoice groups (AP, TMT) are set for you. Please tell IT or Accounting.</p>'
+                             + '<a class="nb-btn nb-btn--secondary" href="' + esc(self() + '&mode=logout') + '">Sign out</a>'));
+            }
+            return;
+        }
+        // A group this person may not see falls back to the first one they may; only their own choice is saved.
+        if (allowedGroupKeys().indexOf(GROUP) < 0) {
+            GROUP = allowedGroupKeys()[0];
+            groupChosen = false;
+        }
+        if (groupChosen && cookieValue(req, GROUP_COOKIE_NAME).toUpperCase() !== GROUP) setGroupCookie(res, GROUP);
 
         // --- AP / TMT toggle ---
         // Pages and suggestion feeds that show invoices need the group's vendor category. If it
@@ -4231,6 +4498,11 @@ document.addEventListener("click",function(e){
 
         // --- diagnostic: which attachment read method works? ---
         if (req.parameters.mode === 'diag') {
+            if (scoped()) {
+                res.setHeader({ name: 'Content-Type', value: 'application/json' });
+                res.write(JSON.stringify({ error: 'Not available with limited access.' }));
+                return;
+            }
             var bid = req.parameters.bill
                    || (req.parameters.tran ? billIdFromTranId(req.parameters.tran) : null);
             var out = { billId: bid, resolvedFrom: req.parameters.tran || 'bill param' };
@@ -4267,11 +4539,12 @@ document.addEventListener("click",function(e){
                 // PDFs uploaded through the Upload tab, whether still waiting for their invoice
                 // or attached, open for everyone who can use the lookup. People never need to
                 // open the File Cabinet folder; the lookup serves the file.
-                if (String(f.description || '').indexOf(DOC_MARK) === 0) allowed = true;
+                // Someone with limited access opens only the ones they can see (see filterDocs).
+                if (String(f.description || '').indexOf(DOC_MARK) === 0) allowed = filterDocs([parseDoc(f.description)]).length > 0;
 
                 // Anything else (the Bill Capture scans) opens only when its folder is one of
                 // the scan folders AND the file is attached to the vendor bill in the link.
-                if (!allowed && billId && isVendorBill(billId)
+                if (!allowed && billId && isVendorBill(billId) && billVisible(billId)
                         && scanFolderIds().indexOf(Number(f.folder)) >= 0) {
                     allowed = billAttachments(billId).some(function (a) {
                         return String(a.id) === String(fileId);
@@ -4306,7 +4579,7 @@ document.addEventListener("click",function(e){
                 details: AUTH_USER + ' opened bill ' + billParam + ' from ' + req.clientIpAddress
             });
 
-            var one = loadBillsByIds([Number(billParam)]);
+            var one = billVisible(billParam) ? loadBillsByIds([Number(billParam)]) : [];
             if (!one.length) { res.write(searchPage('We could not find that invoice. Try searching again.')); return; }
             followBillGroup(res, billParam);
             res.write(renderBill(one[0]));
@@ -4353,7 +4626,7 @@ document.addEventListener("click",function(e){
             if (!exactHits.length && allHits.length === 1) {
                 var otherKey = '';
                 try { otherKey = groupKeyForCategory(allHits[0].category); } catch (e) { otherKey = ''; }
-                if (otherKey) { followGroup(res, otherKey); exactHits = allHits; }
+                if (otherKey && allowedGroupKeys().indexOf(otherKey) >= 0) { followGroup(res, otherKey); exactHits = allHits; }
             }
 
             if (exactHits.length === 1) {
@@ -4394,7 +4667,7 @@ document.addEventListener("click",function(e){
         var waitingHits = (by === 'all' && !rangeActive()) ? searchWaiting(term, 25) : [];
 
         if (!vendorHits.length && !billHits.length && !waitingHits.length) {
-            var otherLabels = VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP; }).map(function (g) { return g.label; });
+            var otherLabels = VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP && allowedGroupKeys().indexOf(g.key) >= 0; }).map(function (g) { return g.label; });
             res.write(searchPage('We could not find a vendor, invoice #, order # or unit # matching "'
                                + term + '" in ' + groupDef(GROUP).label + ' invoices. Try fewer characters'
                                + (otherLabels.length ? ', or switch to ' + otherLabels.join(' or ') : '') + '.', term));
