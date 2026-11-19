@@ -88,13 +88,17 @@ function (search, file, record, query, runtime, format, crypto, encode, log, url
         { key: 'AP',  label: 'AP',  externalId: 'AP',  name: 'AP'  },
         { key: 'TMT', label: 'TMT', externalId: 'TMT', name: 'TMT' }
     ];
-    // The group shown the first time someone opens the lookup. After that each browser keeps the
-    // last one chosen (a cookie), for GROUP_COOKIE_DAYS days.
+    // Someone who may see more than one group also gets a "Both" choice (all of their groups at
+    // once). ALL_GROUPS_KEY is what &group= and the cookie carry for it.
+    var ALL_GROUPS_KEY = 'ALL';
+
+    // The group shown the first time someone opens the lookup ('AP', 'TMT' or ALL_GROUPS_KEY for
+    // both). After that each browser keeps the last one chosen (a cookie), for GROUP_COOKIE_DAYS days.
     var DEFAULT_VENDOR_GROUP = 'AP';
     var GROUP_COOKIE_NAME = 'nts_doclookup_group';
     var GROUP_COOKIE_DAYS = 365;
 
-    var GROUP = '';        // the group (key) in effect for this request
+    var GROUP = '';        // the group (key) in effect for this request, or ALL_GROUPS_KEY for all of the person's groups
     var GROUP_IDS = {};    // group key -> vendor category id, looked up once per request
     var GROUP_UI = false;  // does this page show the toggle?
     var GROUP_BASE = '';   // the address the toggle links start from (this page, without a group)
@@ -144,6 +148,29 @@ function (search, file, record, query, runtime, format, crypto, encode, log, url
         return ids[0];
     }
 
+    /** The choices this person has: each group they may see, plus "Both" when that is more than one. */
+    function groupChoices() {
+        var mine = allowedGroupKeys();
+        return mine.length > 1 ? mine.concat([ALL_GROUPS_KEY]) : mine.slice();
+    }
+
+    /** The group keys in effect for this request (all of the person's groups for "Both"). */
+    function currentGroupKeys() {
+        return GROUP === ALL_GROUPS_KEY ? allowedGroupKeys() : [GROUP];
+    }
+
+    /** Vendor category ids of the groups in effect. */
+    function currentCategoryIds() {
+        return currentGroupKeys().map(groupCategoryId);
+    }
+
+    /** "AP", "TMT", or "AP and TMT" for Both. */
+    function groupLabel(key) {
+        if (key === ALL_GROUPS_KEY) return allowedGroupKeys().map(function (k) { return groupDef(k).label; }).join(' and ');
+        var g = groupDef(key);
+        return g ? g.label : key;
+    }
+
     /** Which group (key) a vendor category id belongs to, or '' when it is in neither. */
     function groupKeyForCategory(catId) {
         for (var i = 0; i < VENDOR_GROUPS.length; i++) {
@@ -164,7 +191,7 @@ function (search, file, record, query, runtime, format, crypto, encode, log, url
 
     /** The group for this request: &group= first, then the saved choice, then the default. */
     function pickGroup(req) {
-        var keys = VENDOR_GROUPS.map(function (g) { return g.key; });
+        var keys = VENDOR_GROUPS.map(function (g) { return g.key; }).concat([ALL_GROUPS_KEY]);
         var asked = String(req.parameters.group || '').trim().toUpperCase();
         if (keys.indexOf(asked) >= 0) return { key: asked, chosen: true };
         var saved = cookieValue(req, GROUP_COOKIE_NAME).toUpperCase();
@@ -873,33 +900,20 @@ background:var(--bg-1);transition:border-color 150ms cubic-bezier(0,0,.2,1),back
 
 .nb-tabs{border-bottom:1px solid var(--border-subtle)}
 .nb-tabs .nb-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:24px}
-/* AP / TMT toggle: a two-part switch. It sits in the search row, right after the Search button;
-   a page without a search box shows it at the right of the tab bar instead. */
+/* AP / TMT / Both choice: a field box labelled "Invoices" in the search row, before the Search
+   button; a page without a search box shows the same small buttons at the right of the tab bar. */
 .nb-groupsel{margin-left:auto;display:flex;align-items:center;gap:10px;padding:6px 0}
-.nb-searchrow .nb-groupsel{margin-left:12px;padding:0;align-self:center}
-.nb-searchrow .nb-grp{align-self:stretch}
-.nb-searchrow .nb-grp__opt{display:inline-flex;align-items:center;padding:0 20px;font-size:14px}
-/* Two groups: AP [switch] TMT, the group in effect in bold. */
-.nb-switchgrp{display:inline-flex;align-items:center;gap:8px}
-.nb-swlbl{font-family:var(--font-display);font-weight:400;font-size:13px;line-height:1;letter-spacing:.06em;text-transform:uppercase;
-color:var(--fg-3);text-decoration:none}
-a.nb-swlbl:hover{color:var(--fg-1);text-decoration:none}
-.nb-swlbl.is-active{color:var(--fg-1);font-weight:700}
-.nb-switch{position:relative;display:inline-block;flex:none;width:36px;height:20px;border-radius:10px;background:var(--bg-3);
-border:1px solid var(--border-control);transition:background-color 150ms cubic-bezier(0,0,.2,1)}
-.nb-switch:hover{border-color:var(--fg-2)}
-.nb-switch__knob{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg-2);
-transition:transform 150ms cubic-bezier(0,0,.2,1)}
-.nb-switch[aria-checked="true"] .nb-switch__knob{transform:translateX(16px)}
-@media (prefers-reduced-motion:reduce){.nb-switch__knob{transition:none}}
-.nb-groupsel__label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3)}
-.nb-grp{display:inline-flex;border:1px solid var(--border-control);border-radius:4px;overflow:hidden}
-.nb-grp__opt{padding:6px 18px;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;text-decoration:none;color:var(--fg-2);background:transparent;
+.nb-searchrow .nb-groupbox{flex:none}
+.nb-chips{display:flex;gap:2px;margin-left:-6px}
+.nb-groupsel .nb-chips{margin-left:0}
+.nb-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:2px;font-family:var(--font-body);font-weight:400;
+font-size:15px;line-height:1;color:var(--fg-2);text-decoration:none;
 transition:background-color 150ms cubic-bezier(0,0,.2,1),color 150ms cubic-bezier(0,0,.2,1)}
-.nb-grp__opt + .nb-grp__opt{border-left:1px solid var(--border-control)}
-.nb-grp__opt:hover{background:var(--bg-3);color:var(--fg-1);text-decoration:none}
-.nb-grp__opt.is-active{background:var(--nb-red);color:var(--nb-white)}
-.nb-grp__opt:focus-visible{outline-offset:-2px}
+.nb-chip:hover{background:var(--bg-3);color:var(--fg-1);text-decoration:none}
+.nb-chip.is-active{background:var(--fg-1);color:var(--bg-1);font-weight:700}
+.nb-chip:focus-visible{outline:2px solid var(--nb-red);outline-offset:1px}
+.nb-groupone{font-weight:400;font-size:16px;line-height:1.4;color:var(--fg-1)}
+.nb-groupsel__label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3)}
 .nb-groupbar{display:flex;justify-content:flex-end;padding-top:12px;padding-bottom:0}
 .nb-groupbar .nb-groupsel{margin-left:0}
 .nb-tab{display:inline-flex;align-items:center;gap:8px;padding:12px 2px;margin-bottom:-1px;border-bottom:2px solid transparent;
@@ -961,7 +975,7 @@ letter-spacing:.06em;text-transform:uppercase;transition:background-color 150ms 
 .nb-pdfpages{display:flex;flex-direction:column;align-items:center;gap:20px;min-width:min-content}
 .nb-pdfpage{position:relative;flex:none;background:#fff;box-shadow:0 2px 10px rgba(0,0,8,.4)}
 .nb-pdfpage canvas{position:absolute;left:0;top:0}
-.nb-pdfpages[data-tool="view"] .nb-pdfov{pointer-events:none}
+.nb-pdfpages[data-tool="view"] .nb-pdfov{touch-action:pan-x pan-y}
 .nb-pdfpages[data-tool="pen"] .nb-pdfov,.nb-pdfpages[data-tool="hl"] .nb-pdfov{cursor:crosshair;touch-action:none}
 .nb-pdfpages[data-tool="text"] .nb-pdfov{cursor:text;touch-action:none}
 .nb-pdfpages[data-tool="erase"] .nb-pdfov{cursor:cell;touch-action:none}
@@ -1352,7 +1366,7 @@ function build(){
     +'<button type="button" class="nb-btn nb-btn--primary" data-a="ok" data-r="ok">Done</button></div>'
     +'</div>'
     +'<div class="nb-pdftools" role="toolbar" aria-label="Notes" data-r="tools">'
-    +'<div class="nb-toolgrp">'+tool("view","Select","pointer","Scroll and read")+tool("pen","Pen","pen","Draw on the page")
+    +'<div class="nb-toolgrp">'+tool("view","Select","pointer","Scroll and read. Drag a note to move it; double-click a typed note to change it.")+tool("pen","Pen","pen","Draw on the page")
     +tool("hl","Highlight","hl","Drag across what to highlight")+tool("text","Text","text","Click where the note goes and type. Enter finishes, Shift+Enter starts a new line.")
     +tool("erase","Erase","erase","Click or drag over a note to remove it")+'</div>'
     +'<div class="nb-toolgrp" role="group" aria-label="Note color">'+sw+'</div>'
@@ -1591,27 +1605,48 @@ function hit(pp,m,x,y){
   }
   return false;
 }
-function eraseAt(pp,x,y){
-  // Topmost first: pen and text are drawn over highlights.
+/** Index of the top-most note under (x,y) on this page, or -1. Pen and text are drawn over highlights. */
+function topHit(pp,x,y){
   var order=S.marks.map(function(m,i){return i;}).filter(function(i){return S.marks[i].p===pp.i;});
   order=order.filter(function(i){return notHl(S.marks[i]);}).reverse().concat(order.filter(function(i){return isHl(S.marks[i]);}).reverse());
-  for(var k=0;k<order.length;k++){
-    if(hit(pp,S.marks[order[k]],x,y)){S.marks.splice(order[k],1);drawMarks(pp);return true;}
-  }
-  return false;
+  for(var k=0;k<order.length;k++)if(hit(pp,S.marks[order[k]],x,y))return order[k];
+  return -1;
+}
+function eraseAt(pp,x,y){
+  var i=topHit(pp,x,y);
+  if(i<0)return false;
+  S.marks.splice(i,1);drawMarks(pp);return true;
+}
+/** A copy of a note moved by (dx,dy) in page units. */
+function shifted(m,dx,dy){
+  var c=JSON.parse(JSON.stringify(m));
+  if(c.t==="pen")c.pts=c.pts.map(function(p){return [rnd(p[0]+dx),rnd(p[1]+dy)];});
+  else if(c.t==="hl"){c.a=[rnd(c.a[0]+dx),rnd(c.a[1]+dy)];c.b=[rnd(c.b[0]+dx),rnd(c.b[1]+dy)];}
+  else if(c.t==="text")c.lines.forEach(function(l){l.x=rnd(l.x+dx);l.y=rnd(l.y+dy);});
+  return c;
+}
+/** Double-click on a typed note: open it again for typing, where it is. Esc puts it back as it was. */
+function editTextAt(pp,x,y){
+  var i=topHit(pp,x,y);
+  if(i<0||S.marks[i].t!=="text")return;
+  var m=S.marks[i],fs=m.s*pp.vp.scale,v=V(pp,[m.lines[0].x,m.lines[0].y]);
+  remember();
+  S.marks.splice(i,1);drawMarks(pp);
+  startText(pp,v[0],v[1]-BL*fs,{value:m.lines.map(function(l){return l.s;}).join(NL),color:m.c,orig:m,idx:i});
 }
 function pointAt(pp,e){var r=pp.ov.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];}
 
 // ---- typed notes ----
-function startText(pp,x,y){
+function startText(pp,x,y,again){
   if(S.edit)commitText();
   var fs=TEXT_PT*pp.vp.scale;
   var ta=document.createElement("textarea");
   ta.className="nb-pdftext";ta.rows=1;ta.setAttribute("aria-label","Note text");ta.spellcheck=true;
-  ta.style.left=(x-1)+"px";ta.style.top=(y-1)+"px";ta.style.fontSize=fs+"px";ta.style.color=P.color;
+  ta.style.left=(x-1)+"px";ta.style.top=(y-1)+"px";ta.style.fontSize=fs+"px";ta.style.color=again?again.color:P.color;
   ta.style.height=Math.ceil(fs*LH+2)+"px";ta.style.width="140px";
+  if(again)ta.value=again.value;
   pp.wrap.appendChild(ta);
-  var ed={pp:pp,x:x,y:y,ta:ta};
+  var ed={pp:pp,x:x,y:y,ta:ta,again:again||null};
   S.edit=ed;
   function grow(){ta.style.height="0px";ta.style.height=(ta.scrollHeight+2)+"px";ta.style.width="0px";ta.style.width=Math.max(140,ta.scrollWidth+fs)+"px";}
   ta.addEventListener("input",grow);
@@ -1622,23 +1657,28 @@ function startText(pp,x,y){
   ta.addEventListener("blur",function(){setTimeout(function(){if(S&&S.edit===ed)commitText();},0);});
   // Focus now, inside the click, so the first keys typed land in the note.
   ta.focus({preventScroll:true});
+  if(again)grow();
 }
 function cancelText(){
   var e=S&&S.edit;if(!e)return;S.edit=null;
   if(e.ta.parentNode)e.ta.parentNode.removeChild(e.ta);
+  // Changing a note and pressing Esc: put it back as it was.
+  if(e.again){S.hist.pop();S.marks.splice(e.again.idx,0,e.again.orig);drawMarks(e.pp);markButtons();}
 }
 function commitText(){
   var e=S&&S.edit;if(!e)return;S.edit=null;
-  var color=P.color,raw=e.ta.value;
+  var color=e.again?e.again.color:P.color,raw=e.ta.value;
   if(e.ta.parentNode)e.ta.parentNode.removeChild(e.ta);
   var lines=raw.split(NL).map(cleanLine);
   while(lines.length&&!lines[lines.length-1].trim())lines.pop();
-  if(!lines.join("").trim())return;
+  if(!lines.join("").trim()){if(e.again)changed();return;}
   var pp=e.pp,fs=TEXT_PT*pp.vp.scale;
   var a=pp.vp.convertToPdfPoint(e.x,e.y),b=pp.vp.convertToPdfPoint(e.x+100,e.y);
   var m={t:"text",p:pp.i,c:color,s:TEXT_PT,ang:Math.round(Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI),
     lines:lines.map(function(l,k){var q=Q(pp,e.x,e.y+(BL+k*LH)*fs);return {x:q[0],y:q[1],s:l};})};
-  remember();S.marks.push(m);drawMarks(pp);changed();
+  // A changed note keeps its place in the stack (its undo step was taken when it was opened).
+  if(e.again)S.marks.splice(e.again.idx,0,m);else{remember();S.marks.push(m);}
+  drawMarks(pp);changed();
 }
 
 // ---- writing the notes into the PDF ----
@@ -1717,8 +1757,9 @@ function wire(){
     if(o.fields){out.order=D.order.value;out.unit=D.unit.value;}
     close(out);
   });
-  D.dlg.addEventListener("keydown",function(e){
-    if(!S)return;
+  // On the document, not the dialog: after a typed note closes, focus is back on the page body.
+  document.addEventListener("keydown",function(e){
+    if(!S||!D.dlg.open)return;
     var t=e.target,typing=t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA");
     if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&(e.key==="z"||e.key==="Z")&&!typing&&S.canMark){e.preventDefault();undo();}
   });
@@ -1728,6 +1769,16 @@ function wire(){
     if(!S||!S.canMark||e.button!==0||!t.classList||!t.classList.contains("nb-pdfov"))return;
     var pp=pageOf(t);if(!pp)return;
     var xy=pointAt(pp,e),x=xy[0],y=xy[1];
+    if(P.tool==="view"){
+      // Select: drag a note to move it. Anywhere else the page scrolls as usual.
+      if(S.edit)commitText();
+      var hi=topHit(pp,x,y);
+      if(hi<0)return;
+      e.preventDefault();
+      if(t.setPointerCapture)try{t.setPointerCapture(e.pointerId);}catch(er){}
+      drag={pp:pp,move:true,idx:hi,x0:x,y0:y,orig:S.marks[hi],before:S.marks.slice()};
+      return;
+    }
     e.preventDefault();
     if(P.tool==="text"){startText(pp,x,y);return;}
     if(S.edit)commitText();
@@ -1738,8 +1789,24 @@ function wire(){
     if(drag&&drag.m)drawMarks(pp,drag.m);
   });
   D.pages.addEventListener("pointermove",function(e){
-    if(!drag||!S)return;
+    if(!S)return;
+    if(!drag){
+      // Select: show a move cursor over a note.
+      var t=e.target;
+      if(P.tool==="view"&&S.canMark&&t.classList&&t.classList.contains("nb-pdfov")){
+        var hp=pageOf(t);
+        if(hp){var hxy=pointAt(hp,e);t.style.cursor=topHit(hp,hxy[0],hxy[1])>=0?"move":"";}
+      }
+      return;
+    }
     var pp=drag.pp,xy=pointAt(pp,e),x=xy[0],y=xy[1];
+    if(drag.move){
+      var a=pp.vp.convertToPdfPoint(drag.x0,drag.y0),b=pp.vp.convertToPdfPoint(x,y);
+      S.marks[drag.idx]=shifted(drag.orig,b[0]-a[0],b[1]-a[1]);
+      drag.moved=drag.moved||Math.abs(x-drag.x0)+Math.abs(y-drag.y0)>2;
+      drawMarks(pp);
+      return;
+    }
     if(drag.m&&drag.m.t==="pen"){
       var q=Q(pp,x,y),last=drag.m.pts[drag.m.pts.length-1];
       if(Math.abs(q[0]-last[0])+Math.abs(q[1]-last[1])>=0.5){drag.m.pts.push(q);drawMarks(pp,drag.m);}
@@ -1750,6 +1817,11 @@ function wire(){
   function end(){
     if(!drag||!S){drag=null;return;}
     var d=drag;drag=null;
+    if(d.move){
+      if(d.moved){S.hist.push(d.before);changed();}
+      else{S.marks[d.idx]=d.orig;drawMarks(d.pp);}
+      return;
+    }
     if(d.m){
       var keep=d.m.t==="pen"||(d.x1!==undefined&&Math.abs(d.x1-d.x0)>=4&&Math.abs(d.y1-d.y0)>=4);
       if(keep){remember();S.marks.push(d.m);changed();}
@@ -1759,6 +1831,14 @@ function wire(){
     }
   }
   D.pages.addEventListener("pointerup",end);
+  D.pages.addEventListener("dblclick",function(e){
+    var t=e.target;
+    if(!S||!S.canMark||P.tool!=="view"||!t.classList||!t.classList.contains("nb-pdfov"))return;
+    var pp=pageOf(t);if(!pp)return;
+    var xy=pointAt(pp,e);
+    e.preventDefault();
+    editTextAt(pp,xy[0],xy[1]);
+  });
   D.pages.addEventListener("pointercancel",end);
 }
 function undo(){
@@ -1827,6 +1907,7 @@ window.NbPdf={open:open,bake:bake};
     /** Switches to another group (a link led to a vendor or invoice of that group) and remembers it. */
     function followGroup(res, key) {
         if (!key || key === GROUP || allowedGroupKeys().indexOf(key) < 0) return;
+        if (GROUP === ALL_GROUPS_KEY) return;   // "Both" already shows it
         log.audit({ title: 'vendor group followed', details: AUTH_USER + ' ' + GROUP + ' -> ' + key + ' (link to a record of that group)' });
         GROUP = key;
         MISSING_COUNT = null;
@@ -2024,51 +2105,40 @@ window.NbPdf={open:open,bake:bake};
                               : 'All subsidiaries') + '</p>';
     }
 
-    /** The AP / TMT toggle: a link for each group, the one in effect marked. */
-    function groupToggleHtml() {
-        var mine = allowedGroupKeys();
-        var shown = VENDOR_GROUPS.filter(function (g) { return mine.indexOf(g.key) >= 0; });
-        function href(g) { return esc(GROUP_BASE + '&group=' + encodeURIComponent(g.key)); }
-
-        // One group: nothing to switch, just say which invoices these are.
-        if (shown.length === 1) {
-            return '<div class="nb-groupsel"><span class="nb-swlbl is-active" data-group="' + esc(shown[0].key) + '">'
-                 + esc(shown[0].label) + ' invoices</span></div>';
+    /**
+     * The AP / TMT / Both choice. In the search row (inRow) it is a field box like From and To,
+     * labelled "Invoices", with one small button per choice; elsewhere the same buttons sit in
+     * the tab bar. Someone with a single group just sees which one it is.
+     */
+    function groupToggleHtml(inRow) {
+        var choices = groupChoices();
+        var body;
+        if (choices.length === 1) {
+            body = '<span class="nb-groupone" data-group="' + esc(choices[0]) + '">' + esc(groupLabel(choices[0])) + '</span>';
+        } else {
+            body = '<div class="nb-chips">' + choices.map(function (k) {
+                var on = k === GROUP;
+                var text = k === ALL_GROUPS_KEY ? (choices.length === 3 ? 'Both' : 'All') : groupLabel(k);
+                return '<a class="nb-chip' + (on ? ' is-active' : '') + '" href="' + esc(GROUP_BASE + '&group=' + encodeURIComponent(k)) + '"'
+                     + ' data-group="' + esc(k) + '"' + (on ? ' aria-current="true"' : '')
+                     + ' title="Show ' + esc(groupLabel(k)) + ' invoices">' + esc(text) + '</a>';
+            }).join('') + '</div>';
         }
-        // Two groups: a small switch between the two names (AP [o-] TMT). Either name, or the switch, changes group.
-        if (shown.length === 2) {
-            var a = shown[0], b = shown[1], onB = GROUP === b.key, other = onB ? a : b;
-            function lbl(g) {
-                var on = g.key === GROUP;
-                return '<a class="nb-swlbl' + (on ? ' is-active' : '') + '" href="' + href(g) + '" data-group="' + esc(g.key) + '"'
-                     + (on ? ' aria-current="true"' : '') + ' title="Show ' + esc(g.label) + ' invoices">' + esc(g.label) + '</a>';
-            }
-            return '<div class="nb-groupsel"><div class="nb-switchgrp" role="group" aria-label="Invoices">'
-                 + lbl(a)
-                 + '<a class="nb-switch" role="switch" aria-checked="' + (onB ? 'true' : 'false') + '" href="' + href(other) + '" data-group="' + esc(other.key) + '"'
-                 + ' aria-label="Show ' + esc(b.label) + ' invoices" title="Switch to ' + esc(other.label) + ' invoices"><span class="nb-switch__knob"></span></a>'
-                 + lbl(b) + '</div></div>';
-        }
-        // More than two groups: the segmented buttons.
-        var opts = shown.map(function (g) {
-            var on = g.key === GROUP;
-            return '<a class="nb-grp__opt' + (on ? ' is-active' : '') + '" href="' + esc(GROUP_BASE + '&group=' + encodeURIComponent(g.key)) + '"'
-                 + ' data-group="' + esc(g.key) + '"'
-                 + (on ? ' aria-current="true"' : '') + ' title="Show ' + esc(g.label) + ' invoices">' + esc(g.label) + '</a>';
-        }).join('');
-        return '<div class="nb-groupsel"><span class="nb-groupsel__label" id="nbGroupLabel">Invoices</span>'
-             + '<div class="nb-grp" role="group" aria-labelledby="nbGroupLabel">' + opts + '</div></div>';
+        return inRow
+            ? '<div class="nb-fieldbox nb-groupbox" data-groupsel="1" role="group" aria-labelledby="nbGroupLabel">'
+              + '<span class="nb-fl" id="nbGroupLabel">Invoices</span>' + body + '</div>'
+            : '<div class="nb-groupsel" data-groupsel="1" role="group" aria-labelledby="nbGroupLabel">'
+              + '<span class="nb-groupsel__label" id="nbGroupLabel">Invoices</span>' + body + '</div>';
     }
 
     /** Shown when the lookup cannot find the vendor category for the group in effect. */
     function groupErrorPage(msg) {
         GROUP_UI = false;
-        var d = groupDef(GROUP);
         var others = VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP && allowedGroupKeys().indexOf(g.key) >= 0; }).map(function (g) {
             return '<a class="nb-btn nb-btn--secondary" href="' + esc(self() + '&group=' + encodeURIComponent(g.key)) + '">Show ' + esc(g.label) + ' invoices</a>';
         }).join(' ');
         return page('<div class="nb-overline">Setup needed</div>'
-                  + '<h1 class="nb-headline nb-h2">The ' + esc(d ? d.label : GROUP) + ' invoices cannot be shown right now.</h1>'
+                  + '<h1 class="nb-headline nb-h2">The ' + esc(groupLabel(GROUP)) + ' invoices cannot be shown right now.</h1>'
                   + '<p class="nb-lead">' + esc(msg) + '</p>'
                   + '<p class="nb-help">Please tell IT or Accounting.</p>'
                   + (others ? '<div class="nb-actions">' + others + '</div>' : ''));
@@ -2237,13 +2307,13 @@ document.addEventListener("click",function(ev){
              + '<input class="nb-bare" type="date" id="df" value="' + esc(DATE_FROM) + '"></div>'
              + '<div class="nb-fieldbox nb-datebox"><label class="nb-fl" for="dt">To</label>'
              + '<input class="nb-bare" type="date" id="dt" value="' + esc(DATE_TO) + '"></div>'
-             + '<button id="btn" class="nb-btn nb-btn--primary" type="button">Search</button>'
              + (function () {
-                   // The AP / TMT toggle sits right after the Search button (and then not in the tab bar).
+                   // The AP / TMT / Both choice sits with the other filters, before Search (and then not in the tab bar).
                    if (!GROUP_UI) return '';
                    TOGGLE_IN_SEARCH = true;
-                   return groupToggleHtml();
+                   return groupToggleHtml(true);
                })()
+             + '<button id="btn" class="nb-btn nb-btn--primary" type="button">Search</button>'
              + (rangeActive()
                  ? '<button id="cleardates" class="nb-btn nb-btn--ghost" type="button">Clear dates</button>'
                  : '')
@@ -2589,6 +2659,7 @@ document.addEventListener("click",function(ev){
         // because a plain SELECT * around a subquery does not preserve it.
         var rank = 'CASE WHEN UPPER(entityid) = ? OR UPPER(companyname) = ? THEN 0 ELSE 1 END';
         // Limited to this person's subsidiaries when FLD_SUBS says so (nothing added otherwise).
+        var cats = currentCategoryIds();
         return withVendorSubs(function () {
             var vs = vendorSubSql('vnd');
             return query.runSuiteQL({
@@ -2596,10 +2667,10 @@ document.addEventListener("click",function(ev){
                      + 'SELECT id, entityid, companyname, ' + rank + ' AS rnk FROM vendor' + (vs.sql ? ' vnd' : '') + ' '
                      + 'WHERE NVL(isinactive, \'F\') = \'F\' '
                      + 'AND (UPPER(entityid) LIKE ? OR UPPER(companyname) LIKE ?) '
-                     + 'AND category = ?' + vs.sql + ' '
+                     + 'AND category IN (' + qmarks(cats.length) + ')' + vs.sql + ' '
                      + 'ORDER BY rnk, entityid'
                      + ') WHERE ROWNUM <= ' + Number(limit) + ') ORDER BY rnk, entityid',
-                params: [up, up, like, like, groupCategoryId(GROUP)].concat(vs.params)
+                params: [up, up, like, like].concat(cats, vs.params)
             }).asMappedResults();
         });
     }
@@ -2650,8 +2721,9 @@ document.addEventListener("click",function(ev){
     function matchBills(term, by, limit, offset, opts) {
         offset = offset || 0;
         opts = opts || {};
-        var vendorSql = (opts.vendorId ? ' AND t.entity = ?' : '') + ' AND v.category = ?';
-        var scope = scopeSql('t', '');   // the group is already v.category = GROUP, one this person may see
+        var cats = currentCategoryIds();
+        var vendorSql = (opts.vendorId ? ' AND t.entity = ?' : '') + ' AND v.category IN (' + qmarks(cats.length) + ')';
+        var scope = scopeSql('t', '');   // the groups in effect are already in v.category IN (...), all ones this person may see
         var cols = 't.id AS id, t.tranid AS tranid, t.externalid AS externalid, t.otherrefnum AS otherrefnum, '
                  + 't.trandate AS trandate, v.entityid AS vendorid, v.companyname AS vendorname'
                  + (UNIT_COL ? ', t.' + UNIT_COL + ' AS unit' : '');
@@ -2671,8 +2743,7 @@ document.addEventListener("click",function(ev){
             eqs.forEach(function () { params.push(up); });
             likes.forEach(function () { params.push(like); });
             if (opts.vendorId) params.push(Number(opts.vendorId));
-            params.push(groupCategoryId(GROUP));
-            params = params.concat(scope.params);
+            params = params.concat(cats, scope.params);
 
             // Best matches first, unless the person chose a column to sort by.
             inner = 'SELECT ' + cols + ', CASE WHEN ' + eqs.join(' OR ') + ' THEN 0 ELSE 1 END AS rnk '
@@ -2681,8 +2752,7 @@ document.addEventListener("click",function(ev){
         } else {
             // No search text: every bill in the date range (or of one vendor), newest first unless sorted.
             if (opts.vendorId) params.push(Number(opts.vendorId));
-            params.push(groupCategoryId(GROUP));
-            params = params.concat(scope.params);
+            params = params.concat(cats, scope.params);
             inner = 'SELECT ' + cols + ' ' + from + "WHERE t.type = 'VendBill'" + vendorSql + scope.sql + dateSql()
                   + ' ORDER BY ' + sqlOrderBy(opts.sort);
         }
@@ -2720,8 +2790,9 @@ document.addEventListener("click",function(ev){
             where += ' AND (' + likes.join(' OR ') + ')';
         }
         if (opts.vendorId) { where += ' AND t.entity = ?'; params.push(Number(opts.vendorId)); }
-        where += ' AND v.category = ?';
-        params.push(groupCategoryId(GROUP));
+        var cats = currentCategoryIds();
+        where += ' AND v.category IN (' + qmarks(cats.length) + ')';
+        params = params.concat(cats);
         var scope = scopeSql('t', '');
         where += scope.sql;
         params = params.concat(scope.params);
@@ -3755,8 +3826,8 @@ document.addEventListener("click",function(ev){
     function groupVendorIds() {
         if (GROUP_VENDOR_IDS !== null) return GROUP_VENDOR_IDS;
         GROUP_VENDOR_IDS = query.runSuiteQL({
-            query: 'SELECT id FROM vendor WHERE category = ? ORDER BY id',
-            params: [groupCategoryId(GROUP)]
+            query: 'SELECT id FROM vendor WHERE category IN (' + qmarks(currentCategoryIds().length) + ') ORDER BY id',
+            params: currentCategoryIds()
         }).asMappedResults().map(function (r) { return Number(r.id); });
         return GROUP_VENDOR_IDS;
     }
@@ -3768,7 +3839,7 @@ document.addEventListener("click",function(ev){
             var ids = groupVendorIds();
             inGroup = ['entity', 'anyof', ids.length ? ids : [0]];
         } else {
-            inGroup = ['vendor.category', 'anyof', groupCategoryId(GROUP)];
+            inGroup = ['vendor.category', 'anyof', currentCategoryIds()];
         }
         var out = [['mainline', 'is', 'T'], 'AND', ['type', 'anyof', 'VendBill'],
                    'AND', ['file.internalid', 'anyof', '@NONE@'], 'AND', inGroup];
@@ -4445,8 +4516,9 @@ document.addEventListener("click",function(e){
             return;
         }
         // A group this person may not see falls back to the first one they may; only their own choice is saved.
-        if (allowedGroupKeys().indexOf(GROUP) < 0) {
-            GROUP = allowedGroupKeys()[0];
+        if (groupChoices().indexOf(GROUP) < 0) {
+            var dflt = String(DEFAULT_VENDOR_GROUP || '').toUpperCase();
+            GROUP = groupChoices().indexOf(dflt) >= 0 ? dflt : allowedGroupKeys()[0];
             groupChosen = false;
         }
         if (groupChosen && cookieValue(req, GROUP_COOKIE_NAME).toUpperCase() !== GROUP) setGroupCookie(res, GROUP);
@@ -4458,7 +4530,7 @@ document.addEventListener("click",function(e){
         var gTab = req.parameters.tab;
         if ((!gMode || gMode === 'suggest' || gMode === 'vendors') && gTab !== 'upload' && gTab !== 'queue') {
             try {
-                groupCategoryId(GROUP);
+                currentCategoryIds();
             } catch (e) {
                 log.error({ title: 'vendor group lookup failed', details: e.name + ': ' + e.message });
                 if (gMode) {
@@ -4656,7 +4728,7 @@ document.addEventListener("click",function(e){
         // &v= is an exact vendor ID (what the type-ahead and vendor links send).
         if (exactVendor) {
             var allHits = findVendors(exactVendor);
-            var exactHits = allHits.filter(function (h) { return Number(h.category) === groupCategoryId(GROUP); });
+            var exactHits = allHits.filter(function (h) { return currentCategoryIds().indexOf(Number(h.category)) >= 0; });
 
             // A link to a vendor of the other group: follow it instead of dead-ending.
             if (!exactHits.length && allHits.length === 1) {
@@ -4703,9 +4775,9 @@ document.addEventListener("click",function(e){
         var waitingHits = (by === 'all' && !rangeActive()) ? searchWaiting(term, 25) : [];
 
         if (!vendorHits.length && !billHits.length && !waitingHits.length) {
-            var otherLabels = VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP && allowedGroupKeys().indexOf(g.key) >= 0; }).map(function (g) { return g.label; });
+            var otherLabels = GROUP === ALL_GROUPS_KEY ? [] : VENDOR_GROUPS.filter(function (g) { return g.key !== GROUP && allowedGroupKeys().indexOf(g.key) >= 0; }).map(function (g) { return g.label; });
             res.write(searchPage('We could not find a vendor, invoice #, order # or unit # matching "'
-                               + term + '" in ' + groupDef(GROUP).label + ' invoices. Try fewer characters'
+                               + term + '" in ' + groupLabel(GROUP) + ' invoices. Try fewer characters'
                                + (otherLabels.length ? ', or switch to ' + otherLabels.join(' or ') : '') + '.', term));
             return;
         }

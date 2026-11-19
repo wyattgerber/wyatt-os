@@ -34,9 +34,22 @@ function makeEnv(opts) {
   /** The access limit at the end of the params (scopeSql always appends last). */
   function tail(q, params) {
     const nSub = (/stl\.subsidiary IN \(([?, ]*)\)/.exec(q) || [, ''])[1].split('?').length - 1;
-    const nCat = (/v\.category IN \(([?, ]*)\)/.exec(q) || [, ''])[1].split('?').length - 1;
+    // Only billsByOrder / visibleBillIds put a category limit in the scope part.
+    const nCat = /UPPER\(t\.tranid\) IN|AND t\.id IN \(/.test(q) ? (/v\.category IN \(([?, ]*)\)/.exec(q) || [, ''])[1].split('?').length - 1 : 0;
     const end = params.length, rest = params.slice(0, end - nSub - nCat);
     return { subs: nSub ? params.slice(end - nSub - nCat, end - nCat) : null, cats: nCat ? params.slice(end - nCat) : null, rest, none: /AND 1 = 0/.test(q) };
+  }
+  /** The groups' category ids a bill query asks for (the params just before the scope ones). */
+  function groupCats(q, t) {
+    const n = (/v\.category IN \(([?, ]*)\)/.exec(q) || [, ''])[1].split('?').length - 1;
+    return t.rest.slice(t.rest.length - n);
+  }
+  /** A search term's LIKE value ('%EPO%'), if the query has one. */
+  function termOk(b, params) {
+    const like = params.find(x => typeof x === 'string' && /^%.*%$/.test(x));
+    if (!like) return true;
+    const t = like.slice(1, -1);
+    return [b.tranid, b.unit, 'INV-' + b.id].some(v => String(v || '').toUpperCase().indexOf(t) >= 0);
   }
   function inScope(b, t) {
     if (t.none) return false;
@@ -81,18 +94,19 @@ function makeEnv(opts) {
         rows = bills.filter(b => params.indexOf(b.id) >= 0).map(b => ({ id: b.id, externalid: '', otherrefnum: 'INV-' + b.id, unit: b.unit, vendorid: b.vendorid, vendorname: b.vendorname }));
       }
       else if (/SELECT COUNT\(\*\) AS n FROM transaction t/.test(q)) {
-        const t = tail(q, params), cat = t.rest[t.rest.length - 1];
-        rows = [{ n: bills.filter(b => b.category === cat && inScope(b, t)).length }];
+        const t = tail(q, params), cats = groupCats(q, t);
+        rows = [{ n: bills.filter(b => cats.indexOf(b.category) >= 0 && inScope(b, t) && termOk(b, params)).length }];
       }
       else if (/FROM \(SELECT x\.id AS id/.test(q)) {
-        const t = tail(q, params), cat = t.rest[t.rest.length - 1];
-        rows = bills.filter(b => b.category === cat && inScope(b, t)).map(b => ({ id: b.id, tranid: b.tranid, vendorid: b.vendorid, vendorname: b.vendorname, unit: b.unit }));
+        const t = tail(q, params), cats = groupCats(q, t);
+        rows = bills.filter(b => cats.indexOf(b.category) >= 0 && inScope(b, t) && termOk(b, params)).map(b => ({ id: b.id, tranid: b.tranid, vendorid: b.vendorid, vendorname: b.vendorname, unit: b.unit }));
       }
       else if (/FROM vendor/.test(q) && /companyname/.test(q)) {
         const vsr = /vendorsubsidiaryrelationship/.test(q);
         if (opts.noVsr && vsr) throw Object.assign(new Error('Search error: Unknown identifier vendorsubsidiaryrelationship'), { name: 'SSS_SEARCH_ERROR_OCCURRED' });
-        const like = String(params[2]).replace(/%/g, ''), cat = params[4], subs = params.length > 5 ? params.slice(5, vsr ? 5 + (params.length - 5) / 2 : params.length) : null;
-        rows = vendors.filter(v => (v.entityid.indexOf(like) >= 0 || v.companyname.toUpperCase().indexOf(like) >= 0) && v.category === cat
+        const nc = /AND category IN \(([?, ]*)\)/.exec(q)[1].split('?').length - 1, k = 4 + nc;
+        const like = String(params[2]).replace(/%/g, ''), cats = params.slice(4, k), subs = params.length > k ? params.slice(k, vsr ? k + (params.length - k) / 2 : params.length) : null;
+        rows = vendors.filter(v => (v.entityid.indexOf(like) >= 0 || v.companyname.toUpperCase().indexOf(like) >= 0) && cats.indexOf(v.category) >= 0
           && (!subs || subs.indexOf(v.subsidiary) >= 0 || (vsr && v.shared.some(x => subs.indexOf(x) >= 0))));
       }
       else if (/SELECT id, description FROM file WHERE id = \?/.test(q)) {
@@ -135,7 +149,7 @@ function makeEnv(opts) {
   }
   function catIn(filters) {
     let out = null;
-    (function walk(f) { if (!Array.isArray(f)) return; if (f[0] === 'vendor.category' && f[1] === 'anyof') out = Number(f[2]); f.forEach(walk); })(filters);
+    (function walk(f) { if (!Array.isArray(f)) return; if (f[0] === 'vendor.category' && f[1] === 'anyof') out = [].concat(f[2]).map(Number); f.forEach(walk); })(filters);
     return out;
   }
 
@@ -151,8 +165,8 @@ function makeEnv(opts) {
         if (emp && opts.missingScopeFields && columns.some(c => /custentity_vendor_invoice_(subs|groups)/.test(c))) { const e = new Error('An nlobjSearchColumn contains an invalid column: custentity_vendor_invoice_subs'); e.name = 'SSS_INVALID_SRCH_COL'; throw e; }
         rows = emp ? [result(emp.id, emp.values, emp.texts)] : [];
       } else if (type === 'transaction' && fl.indexOf('@NONE@","') < 0 && fl.indexOf('"file.internalid","anyof","@NONE@"') >= 0) {
-        const cat = catIn(filters);
-        rows = bills.filter(b => !b.hasFile && (cat === null || b.category === cat) && (!subs || subs.indexOf(b.sub) >= 0)).map(billResult);
+        const cats = catIn(filters);
+        rows = bills.filter(b => !b.hasFile && (cats === null || cats.indexOf(b.category) >= 0) && (!subs || subs.indexOf(b.sub) >= 0)).map(billResult);
       } else if (type === 'vendorbill' && fl.indexOf('"internalid","anyof"') >= 0) {
         const ids = idsIn(filters) || [];
         rows = bills.filter(b => ids.indexOf(b.id) >= 0 && (!subs || subs.indexOf(b.sub) >= 0)).map(billResult);

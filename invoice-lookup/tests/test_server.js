@@ -52,7 +52,7 @@ function load1(o, patch) { const e = env(o); return { e, m: load(SL, e, patch) }
 function togglePlacement(html) {
   const nav = between(html, '<nav class="nb-tabs"', '</nav>');
   const row = between(html, '<div class="nb-searchrow">', '<div class="nb-help">');
-  const G = 'class="nb-groupsel"';
+  const G = 'data-groupsel="1"';
   return { total: count(html, G), inNav: count(nav, G), inRow: count(row, G), groupbar: count(html, 'class="nb-wrap nb-groupbar"') };
 }
 {
@@ -62,9 +62,11 @@ function togglePlacement(html) {
   check('search page: one toggle', p.total === 1, JSON.stringify(p));
   check('search page: toggle in search row', p.inRow === 1, JSON.stringify(p));
   check('search page: toggle not in tab bar', p.inNav === 0, JSON.stringify(p));
-  check('search page: toggle right after Search button', html.indexOf('>Search</button><div class="nb-groupsel"><div class="nb-switchgrp"') > 0);
+  check('search page: Invoices box after the dates, before Search', html.indexOf('data-groupsel') > html.indexOf('id="dt"') && html.indexOf('data-groupsel') < html.indexOf('id="btn"')
+        && html.indexOf('<div class="nb-fieldbox nb-groupbox" data-groupsel="1"') > 0);
   check('search page: tabs still there', count(html, 'class="nb-tab') >= 4);
-  check('search page: AP active', /class="nb-swlbl is-active"[^>]*data-group="AP"/.test(html) && /role="switch" aria-checked="false"[^>]*data-group="TMT"/.test(html));
+  check('search page: AP active, TMT and Both offered', /class="nb-chip is-active"[^>]*data-group="AP"/.test(html) && /class="nb-chip"[^>]*data-group="TMT"[^>]*>TMT</.test(html)
+        && /class="nb-chip"[^>]*data-group="ALL"[^>]*>Both</.test(html));
   check('search page: TMT link', html.indexOf('&amp;group=TMT" data-group="TMT"') > 0);
   check('search page: no viewer script', html.indexOf('PDFV_CFG') < 0);
   scripts(html).forEach((s, i) => check('search page script ' + i + ' compiles', !compiles(s), compiles(s)));
@@ -75,7 +77,7 @@ function togglePlacement(html) {
   const p = togglePlacement(html);
   check('results: toggle in row once', p.total === 1 && p.inRow === 1, JSON.stringify(p));
   check('results: toggle keeps search + dates', html.indexOf('&amp;s=EPO&amp;from=2026-11-01&amp;group=TMT') > 0);
-  check('results: clear dates after toggle', html.indexOf('</div></div><button id="cleardates"') > 0);
+  check('results: clear dates after toggle', html.indexOf('>Search</button><button id="cleardates"') > 0);
 }
 {
   const { e, m } = load1();
@@ -110,7 +112,7 @@ function togglePlacement(html) {
 {
   const { e, m } = load1();
   const html = request(m, e, { tab: 'queue' }).body;
-  check('queue tab: no toggle, no viewer', count(html, 'class="nb-groupsel"') === 0 && html.indexOf('PDFV_CFG') < 0);
+  check('queue tab: no toggle, no viewer', count(html, 'data-groupsel="1"') === 0 && html.indexOf('PDFV_CFG') < 0);
 }
 {
   const { e, m } = load1();
@@ -142,7 +144,7 @@ function togglePlacement(html) {
   // Group error page: no toggle anywhere (unchanged).
   const { e, m } = load1();
   const html = request(m, e, { group: 'TMT' }, {}).body;
-  check('TMT search page renders', /class="nb-swlbl is-active"[^>]*data-group="TMT"/.test(html) && /role="switch" aria-checked="true"[^>]*data-group="AP"/.test(html));
+  check('TMT search page renders', /class="nb-chip is-active"[^>]*data-group="TMT"/.test(html));
 }
 {
   // Request state does not leak: a search page after an upload page.
@@ -320,7 +322,7 @@ const PDF64 = Buffer.from('%PDF-1.4\n%test\n').toString('base64');
   {
     const { e, m } = scopedEnv({ groups: '', groupNames: 'AP' });
     const r = request(m, e, { group: 'TMT' });
-    check('AP only: &group=TMT ignored', /<span class="nb-swlbl is-active" data-group="AP">AP invoices<\/span>/.test(r.body) && r.body.indexOf('data-group="TMT"') < 0);
+    check('AP only: &group=TMT ignored', /<span class="nb-groupone" data-group="AP">AP<\/span>/.test(r.body) && r.body.indexOf('data-group="TMT"') < 0 && r.body.indexOf('data-group="ALL"') < 0);
     check('AP only: no TMT cookie written', !r.headers.some(h => h.name === 'Set-Cookie' && /nts_doclookup_group=TMT/.test(h.value)));
     check('AP only: settings', /AP invoices<br>All subsidiaries/.test(r.body));
     check('AP only: TMT bill not found', /could not find that invoice/.test(request(m, e, { b: '2511' }).body));
@@ -332,9 +334,35 @@ const PDF64 = Buffer.from('%PDF-1.4\n%test\n').toString('base64');
   {
     const { e, m } = scopedEnv({ groups: '2', groupNames: 'TMT' });
     const r = request(m, e, {}, {});
-    check('TMT only (list value): lands on TMT', /<span class="nb-swlbl is-active" data-group="TMT">TMT invoices<\/span>/.test(r.body) && r.body.indexOf('data-group="AP"') < 0);
+    check('TMT only (list value): lands on TMT', /<span class="nb-groupone" data-group="TMT">TMT<\/span>/.test(r.body) && r.body.indexOf('data-group="AP"') < 0);
     const s2 = request(m, e, { s: 'EPO' }).body;
     check('TMT only: TMT bills only', JSON.stringify(billRows(s2)) === JSON.stringify(['EPO-00012348']), billRows(s2));
+  }
+  // "Both": every group the person has, at once.
+  {
+    const { e, m } = scopedEnv({});
+    const r = request(m, e, { s: 'EPO', group: 'ALL' });
+    check('Both: AP and TMT bills together', JSON.stringify(billRows(r.body)) === JSON.stringify(['EPO-00012345', 'EPO-00012346', 'EPO-00012347', 'EPO-00012348', 'EPO-00012349']), billRows(r.body));
+    check('Both: marked, and saved for next time', /class="nb-chip is-active"[^>]*data-group="ALL"/.test(r.body) && r.headers.some(h => h.name === 'Set-Cookie' && /nts_doclookup_group=ALL;/.test(h.value)));
+    check('Both: SQL asks for both categories', e.queries.some(q => /v\.category IN \(\?, \?\)/.test(q.q) && q.params.indexOf(1) >= 0 && q.params.indexOf(2) >= 0));
+    const sg = JSON.parse(request(m, e, { mode: 'suggest', q: 'TMTCO', group: 'ALL' }).body);
+    check('Both: TMT vendor suggested', sg.some(x => x.k === 'v' && x.e === 'TMTCO'));
+    const miss = request(m, e, { tab: 'missing', group: 'ALL' }).body;
+    check('Both: missing list has both groups', JSON.stringify(ids(miss)) === JSON.stringify([2508, 2509, 2510, 2511, 2512]), ids(miss));
+    const v = request(m, e, { v: 'TMTCO', group: 'ALL' }).body;
+    check('Both: TMT vendor page without switching group', v.indexOf('<h1 class="nb-headline nb-h1">TMT Company</h1>') > 0 && !e.logs.some(l => l.title === 'vendor group followed'));
+    const nores = request(m, e, { s: 'ZZZZ', group: 'ALL' }).body;
+    check('Both: no-results message names both, suggests no switch', /in AP and TMT invoices\. Try fewer characters\./.test(nores));
+  }
+  {
+    // Only AP allowed: &group=ALL falls back to AP.
+    const { e, m } = scopedEnv({ groupNames: 'AP' });
+    const r = request(m, e, { group: 'ALL' }).body;
+    check('AP only: Both not offered, falls back to AP', r.indexOf('data-group="ALL"') < 0 && /<span class="nb-groupone" data-group="AP">/.test(r));
+  }
+  {
+    const { e, m } = scopedEnv({}, { patch: s => s.replace("var DEFAULT_VENDOR_GROUP = 'AP';", "var DEFAULT_VENDOR_GROUP = 'ALL';") });
+    check('default can be Both', /class="nb-chip is-active"[^>]*data-group="ALL"/.test(request(m, e, {}).body));
   }
   {
     const { e, m } = scopedEnv({ groups: 'AP, TMT' });

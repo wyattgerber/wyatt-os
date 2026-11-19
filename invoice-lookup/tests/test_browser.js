@@ -119,18 +119,20 @@ async function inkPixels(page, idx) {
   await page.screenshot({ path: path.join(OUT, '1c-search-toggle-light.png'), clip: { x: 0, y: 150, width: 1500, height: 110 } });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
   const rowBox = await page.locator('.nb-searchrow').boundingBox();
-  const grpBox = await page.locator('.nb-searchrow .nb-switchgrp').boundingBox();
-  const swBox = await page.locator('.nb-searchrow .nb-switch').boundingBox();
+  const grpBox = await page.locator('.nb-searchrow .nb-groupbox').boundingBox();
+  const dtBox = await page.locator('#dt').locator('xpath=..').boundingBox();
   const btnBox = await page.locator('#btn').boundingBox();
-  check('toggle sits in the search row, right of Search', grpBox.x > btnBox.x + btnBox.width && grpBox.y >= rowBox.y);
-  check('toggle is small and centred on the Search button', swBox.height <= 22 && swBox.width <= 40
-        && Math.abs((swBox.y + swBox.height / 2) - (btnBox.y + btnBox.height / 2)) < 2, JSON.stringify(swBox));
+  check('Invoices box sits between To and Search', grpBox.x > dtBox.x + dtBox.width && grpBox.x + grpBox.width < btnBox.x && grpBox.y >= rowBox.y);
+  check('Invoices box same height as the date boxes', Math.abs(grpBox.height - dtBox.height) <= 2, grpBox.height + ' vs ' + dtBox.height);
+  check('Invoices box is compact', grpBox.width < 200, grpBox.width);
   await page.fill('#vq', 'abc');
-  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-switch')]);
+  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-chip[data-group="TMT"]')]);
   check('switching with typed text keeps it', /&group=TMT&s=abc$/.test(page.url()), page.url());
-  check('switch shows TMT on', (await page.getAttribute('.nb-searchrow .nb-switch', 'aria-checked')) === 'true');
-  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow a.nb-swlbl[data-group="AP"]')]);
-  check('switching without typing follows the link', /&s=abc&group=AP$/.test(page.url()), page.url());
+  check('TMT marked', await page.isVisible('.nb-chip.is-active[data-group="TMT"]'));
+  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-chip[data-group="ALL"]')]);
+  check('switching without typing follows the link (Both)', /&s=abc&group=ALL$/.test(page.url()), page.url());
+  check('Both marked', await page.isVisible('.nb-chip.is-active[data-group="ALL"]'));
+  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-chip[data-group="AP"]')]);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -162,6 +164,33 @@ async function inkPixels(page, idx) {
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('GL 5100');
   await page.keyboard.press('Enter');
+  // Move the typed note with Select, then double-click it to change it, and Esc to keep it as it was.
+  async function inkIn(idx, x0, y0, x1, y1) {
+    return page.evaluate(([i, a, b, c, d]) => {
+      const cv = document.querySelectorAll('.nb-pdfov')[i];
+      const r = cv.width / parseFloat(cv.style.width);
+      const px = cv.getContext('2d').getImageData(Math.round(a * r), Math.round(b * r), Math.round((c - a) * r), Math.round((d - b) * r)).data;
+      let n = 0; for (let k = 3; k < px.length; k += 4) if (px[k] > 0) n++; return n;
+    }, [idx, x0, y0, x1, y1]);
+  }
+  check('note is where it was typed', (await inkIn(0, 420, 195, 520, 240)) > 0);
+  await page.click('[data-tool="view"]');
+  await page.mouse.move(b1.x + 440, b1.y + 210);
+  await page.waitForTimeout(50);
+  check('move cursor over a note', (await page.evaluate(() => document.querySelector('.nb-pdfov').style.cursor)) === 'move');
+  await drag(page, b1, [[440, 210], [520, 330], [590, 460]]);
+  check('note moved away from the old place', (await inkIn(0, 420, 195, 520, 240)) === 0);
+  check('note is at the new place', (await inkIn(0, 570, 445, 670, 490)) > 0);
+  await page.mouse.dblclick(b1.x + 590, b1.y + 460);
+  await page.waitForSelector('.nb-pdftext');
+  check('double-click opens the note with its text', (await page.inputValue('.nb-pdftext')) === 'Approved JD\nGL 5100');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(100);
+  check('Esc keeps the note as it was, viewer still open', (await inkIn(0, 570, 445, 670, 490)) > 0 && await page.evaluate(() => document.querySelector('dialog.nb-pdfdlg').open));
+  await page.keyboard.press('Control+z');
+  check('undo puts the note back where it was typed', (await inkIn(0, 420, 195, 520, 240)) > 0 && (await inkIn(0, 570, 445, 670, 490)) === 0);
+  await drag(page, b1, [[440, 210], [520, 330], [590, 460]]);
+  check('moved again', (await inkIn(0, 570, 445, 670, 490)) > 0);
   // A stray stroke, erased, undone (comes back), erased again.
   await page.click('[data-tool="pen"]');
   await drag(page, b1, [[300, 420], [380, 440]]);
