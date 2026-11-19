@@ -62,9 +62,9 @@ function togglePlacement(html) {
   check('search page: one toggle', p.total === 1, JSON.stringify(p));
   check('search page: toggle in search row', p.inRow === 1, JSON.stringify(p));
   check('search page: toggle not in tab bar', p.inNav === 0, JSON.stringify(p));
-  check('search page: toggle right after Search button', html.indexOf('>Search</button><div class="nb-groupsel">') > 0);
+  check('search page: toggle right after Search button', html.indexOf('>Search</button><div class="nb-groupsel"><div class="nb-switchgrp"') > 0);
   check('search page: tabs still there', count(html, 'class="nb-tab') >= 4);
-  check('search page: AP active', /class="nb-grp__opt is-active"[^>]*data-group="AP"/.test(html));
+  check('search page: AP active', /class="nb-swlbl is-active"[^>]*data-group="AP"/.test(html) && /role="switch" aria-checked="false"[^>]*data-group="TMT"/.test(html));
   check('search page: TMT link', html.indexOf('&amp;group=TMT" data-group="TMT"') > 0);
   check('search page: no viewer script', html.indexOf('PDFV_CFG') < 0);
   scripts(html).forEach((s, i) => check('search page script ' + i + ' compiles', !compiles(s), compiles(s)));
@@ -142,7 +142,7 @@ function togglePlacement(html) {
   // Group error page: no toggle anywhere (unchanged).
   const { e, m } = load1();
   const html = request(m, e, { group: 'TMT' }, {}).body;
-  check('TMT search page renders', html.indexOf('data-group="TMT"') > 0 && /is-active"[^>]*data-group="TMT"/.test(html));
+  check('TMT search page renders', /class="nb-swlbl is-active"[^>]*data-group="TMT"/.test(html) && /role="switch" aria-checked="true"[^>]*data-group="AP"/.test(html));
 }
 {
   // Request state does not leak: a search page after an upload page.
@@ -320,7 +320,7 @@ const PDF64 = Buffer.from('%PDF-1.4\n%test\n').toString('base64');
   {
     const { e, m } = scopedEnv({ groups: '', groupNames: 'AP' });
     const r = request(m, e, { group: 'TMT' });
-    check('AP only: &group=TMT ignored', /class="nb-grp__opt is-active"[^>]*data-group="AP"/.test(r.body) && r.body.indexOf('data-group="TMT"') < 0);
+    check('AP only: &group=TMT ignored', /<span class="nb-swlbl is-active" data-group="AP">AP invoices<\/span>/.test(r.body) && r.body.indexOf('data-group="TMT"') < 0);
     check('AP only: no TMT cookie written', !r.headers.some(h => h.name === 'Set-Cookie' && /nts_doclookup_group=TMT/.test(h.value)));
     check('AP only: settings', /AP invoices<br>All subsidiaries/.test(r.body));
     check('AP only: TMT bill not found', /could not find that invoice/.test(request(m, e, { b: '2511' }).body));
@@ -332,7 +332,7 @@ const PDF64 = Buffer.from('%PDF-1.4\n%test\n').toString('base64');
   {
     const { e, m } = scopedEnv({ groups: '2', groupNames: 'TMT' });
     const r = request(m, e, {}, {});
-    check('TMT only (list value): lands on TMT', /class="nb-grp__opt is-active"[^>]*data-group="TMT"/.test(r.body) && r.body.indexOf('data-group="AP"') < 0);
+    check('TMT only (list value): lands on TMT', /<span class="nb-swlbl is-active" data-group="TMT">TMT invoices<\/span>/.test(r.body) && r.body.indexOf('data-group="AP"') < 0);
     const s2 = request(m, e, { s: 'EPO' }).body;
     check('TMT only: TMT bills only', JSON.stringify(billRows(s2)) === JSON.stringify(['EPO-00012348']), billRows(s2));
   }

@@ -114,15 +114,22 @@ async function inkPixels(page, idx) {
   // ---- toggle next to search ----
   await page.goto(base);
   await page.screenshot({ path: path.join(OUT, '1-search-toggle.png'), clip: { x: 0, y: 0, width: 1500, height: 300 } });
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(OUT, '1c-search-toggle-light.png'), clip: { x: 0, y: 150, width: 1500, height: 110 } });
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
   const rowBox = await page.locator('.nb-searchrow').boundingBox();
-  const grpBox = await page.locator('.nb-searchrow .nb-grp').boundingBox();
+  const grpBox = await page.locator('.nb-searchrow .nb-switchgrp').boundingBox();
+  const swBox = await page.locator('.nb-searchrow .nb-switch').boundingBox();
   const btnBox = await page.locator('#btn').boundingBox();
-  check('toggle sits in the search row, right of Search', grpBox.x > btnBox.x + btnBox.width && Math.abs(grpBox.y - btnBox.y) < 2 && grpBox.y >= rowBox.y);
-  check('toggle as tall as the Search button', Math.abs(grpBox.height - btnBox.height) < 2, grpBox.height + ' vs ' + btnBox.height);
+  check('toggle sits in the search row, right of Search', grpBox.x > btnBox.x + btnBox.width && grpBox.y >= rowBox.y);
+  check('toggle is small and centred on the Search button', swBox.height <= 22 && swBox.width <= 40
+        && Math.abs((swBox.y + swBox.height / 2) - (btnBox.y + btnBox.height / 2)) < 2, JSON.stringify(swBox));
   await page.fill('#vq', 'abc');
-  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-grp__opt[data-group="TMT"]')]);
+  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-switch')]);
   check('switching with typed text keeps it', /&group=TMT&s=abc$/.test(page.url()), page.url());
-  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow .nb-grp__opt[data-group="AP"]')]);
+  check('switch shows TMT on', (await page.getAttribute('.nb-searchrow .nb-switch', 'aria-checked')) === 'true');
+  await Promise.all([page.waitForNavigation(), page.click('.nb-searchrow a.nb-swlbl[data-group="AP"]')]);
   check('switching without typing follows the link', /&s=abc&group=AP$/.test(page.url()), page.url());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base);

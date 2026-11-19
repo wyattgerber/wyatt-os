@@ -876,9 +876,22 @@ background:var(--bg-1);transition:border-color 150ms cubic-bezier(0,0,.2,1),back
 /* AP / TMT toggle: a two-part switch. It sits in the search row, right after the Search button;
    a page without a search box shows it at the right of the tab bar instead. */
 .nb-groupsel{margin-left:auto;display:flex;align-items:center;gap:10px;padding:6px 0}
-.nb-searchrow .nb-groupsel{margin-left:8px;padding:0;align-self:stretch}
+.nb-searchrow .nb-groupsel{margin-left:12px;padding:0;align-self:center}
 .nb-searchrow .nb-grp{align-self:stretch}
 .nb-searchrow .nb-grp__opt{display:inline-flex;align-items:center;padding:0 20px;font-size:14px}
+/* Two groups: AP [switch] TMT, the group in effect in bold. */
+.nb-switchgrp{display:inline-flex;align-items:center;gap:8px}
+.nb-swlbl{font-family:var(--font-display);font-weight:400;font-size:13px;line-height:1;letter-spacing:.06em;text-transform:uppercase;
+color:var(--fg-3);text-decoration:none}
+a.nb-swlbl:hover{color:var(--fg-1);text-decoration:none}
+.nb-swlbl.is-active{color:var(--fg-1);font-weight:700}
+.nb-switch{position:relative;display:inline-block;flex:none;width:36px;height:20px;border-radius:10px;background:var(--bg-3);
+border:1px solid var(--border-control);transition:background-color 150ms cubic-bezier(0,0,.2,1)}
+.nb-switch:hover{border-color:var(--fg-2)}
+.nb-switch__knob{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg-2);
+transition:transform 150ms cubic-bezier(0,0,.2,1)}
+.nb-switch[aria-checked="true"] .nb-switch__knob{transform:translateX(16px)}
+@media (prefers-reduced-motion:reduce){.nb-switch__knob{transition:none}}
 .nb-groupsel__label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3)}
 .nb-grp{display:inline-flex;border:1px solid var(--border-control);border-radius:4px;overflow:hidden}
 .nb-grp__opt{padding:6px 18px;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;text-decoration:none;color:var(--fg-2);background:transparent;
@@ -2014,7 +2027,30 @@ window.NbPdf={open:open,bake:bake};
     /** The AP / TMT toggle: a link for each group, the one in effect marked. */
     function groupToggleHtml() {
         var mine = allowedGroupKeys();
-        var opts = VENDOR_GROUPS.filter(function (g) { return mine.indexOf(g.key) >= 0; }).map(function (g) {
+        var shown = VENDOR_GROUPS.filter(function (g) { return mine.indexOf(g.key) >= 0; });
+        function href(g) { return esc(GROUP_BASE + '&group=' + encodeURIComponent(g.key)); }
+
+        // One group: nothing to switch, just say which invoices these are.
+        if (shown.length === 1) {
+            return '<div class="nb-groupsel"><span class="nb-swlbl is-active" data-group="' + esc(shown[0].key) + '">'
+                 + esc(shown[0].label) + ' invoices</span></div>';
+        }
+        // Two groups: a small switch between the two names (AP [o-] TMT). Either name, or the switch, changes group.
+        if (shown.length === 2) {
+            var a = shown[0], b = shown[1], onB = GROUP === b.key, other = onB ? a : b;
+            function lbl(g) {
+                var on = g.key === GROUP;
+                return '<a class="nb-swlbl' + (on ? ' is-active' : '') + '" href="' + href(g) + '" data-group="' + esc(g.key) + '"'
+                     + (on ? ' aria-current="true"' : '') + ' title="Show ' + esc(g.label) + ' invoices">' + esc(g.label) + '</a>';
+            }
+            return '<div class="nb-groupsel"><div class="nb-switchgrp" role="group" aria-label="Invoices">'
+                 + lbl(a)
+                 + '<a class="nb-switch" role="switch" aria-checked="' + (onB ? 'true' : 'false') + '" href="' + href(other) + '" data-group="' + esc(other.key) + '"'
+                 + ' aria-label="Show ' + esc(b.label) + ' invoices" title="Switch to ' + esc(other.label) + ' invoices"><span class="nb-switch__knob"></span></a>'
+                 + lbl(b) + '</div></div>';
+        }
+        // More than two groups: the segmented buttons.
+        var opts = shown.map(function (g) {
             var on = g.key === GROUP;
             return '<a class="nb-grp__opt' + (on ? ' is-active' : '') + '" href="' + esc(GROUP_BASE + '&group=' + encodeURIComponent(g.key)) + '"'
                  + ' data-group="' + esc(g.key) + '"'
@@ -2172,7 +2208,7 @@ document.addEventListener("click",function(ev){
 // The AP / TMT toggle sits next to the search box. If the person typed a new search or changed
 // the dates before switching, switch with what they typed rather than the page's last search.
 document.addEventListener("click",function(ev){
-  var a=ev.target&&ev.target.closest?ev.target.closest(".nb-searchrow .nb-grp__opt"):null;
+  var a=ev.target&&ev.target.closest?ev.target.closest(".nb-searchrow a[data-group]"):null;
   if(!a||ev.button!==0||ev.ctrlKey||ev.metaKey||ev.shiftKey||ev.altKey)return;
   if(q.value===q.defaultValue&&df.value===df.defaultValue&&dt.value===dt.defaultValue)return;
   ev.preventDefault();
