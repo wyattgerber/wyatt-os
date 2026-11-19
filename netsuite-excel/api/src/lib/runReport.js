@@ -7,7 +7,7 @@ import { formatMoney, parseMoney } from './money.js';
 
 async function fetchTotals(def, params, provider) {
   const { totals } = def.build(params);
-  const res = await provider.query({ report: def.id, kind: 'totals', params, sql: totals }, 0, 1);
+  const res = await provider.query({ report: def.id, kind: 'totals', params: def.queryParams ?? params, sql: totals }, 0, 1);
   if (res.items.length !== 1) throw new ApiError(502, 'NS_TOTALS', 'NetSuite returned an unexpected totals result.', `items=${res.items.length}`);
   const row = res.items[0];
   const count = Number(row.cnt);
@@ -68,7 +68,7 @@ export async function runReport(
     concurrency,
     Array.from({ length: pageCount }, (_, i) => async () => {
       const offset = i * pageSize;
-      const res = await provider.query({ report: def.id, kind: 'rows', params, sql: rowsSql }, offset, pageSize);
+      const res = await provider.query({ report: def.id, kind: 'rows', params: def.queryParams ?? params, sql: rowsSql }, offset, pageSize);
       const expected = Math.min(pageSize, before.count - offset);
       if (res.items.length !== expected) {
         throw new ApiError(502, 'RECONCILIATION_FAILED', 'The data from NetSuite did not match its totals, so nothing was returned. Please try again.', `page ${i}: got ${res.items.length} expected ${expected}`);
@@ -120,7 +120,8 @@ export async function runReport(
     rowCount: rows.length,
     debits: debits === undefined ? null : formatMoney(debits),
     credits: credits === undefined ? null : formatMoney(credits),
-    balanced: debits === undefined || credits === undefined ? null : debits === credits,
+    // Only where balancing is expected: a single account (or a drill-down) is not supposed to balance.
+    balanced: debits === undefined || credits === undefined || (def.balances && !def.balances(params)) ? null : debits === credits,
     reconciliation: 'PASS',
     validated: def.validated,
     notes: [...(def.validated ? [] : ['UNVALIDATED REPORT: not yet reconciled to NetSuite reports.']), ...def.notes],

@@ -56,7 +56,8 @@
     getActiveWorksheet() { if (!active) active = mk('Sheet1'); return wrap(active); },
   };
   const application = { calculate(type) { window.__calculated = type; } };
-  window.Excel = { CalculationType: { full: 'Full' }, run: async (cb) => cb({ workbook: { worksheets, application }, sync: async () => {} }) };
+  const getActiveCell = () => ({ address: window.__activeCell || 'Sheet1!A1', load() {} });
+  window.Excel = { CalculationType: { full: 'Full' }, run: async (cb) => cb({ workbook: { worksheets, application, getActiveCell }, sync: async () => {} }) };
   // Custom functions: record what the add-in registers so the harness can call them like Excel would.
   window.__cf = {};
   window.CustomFunctions = {

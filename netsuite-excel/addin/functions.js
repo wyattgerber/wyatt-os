@@ -7,7 +7,7 @@
 
 const FLUSH_MS = 40;
 const MAX_BATCH = 1000; // server limit per request
-const FILTER_NAMES = ['subsidiary', 'profitCenter', 'department', 'location', 'mode'];
+const FILTER_NAMES = ['subsidiary', 'profitCenter', 'department', 'location', 'mode', 'serviceType'];
 
 /** Last request per cell address, for a future "show detail" drill-down. */
 export const lastRequestByCell = new Map();
@@ -96,18 +96,18 @@ async function flush() {
   });
 }
 
-/** =NS.BALANCE(account, period_or_date, [subsidiary], [profit_center], [department], [location], [mode]) */
-async function balance(account, periodDate, subsidiary, profitCenter, department, location, mode, invocation) {
+/** =NS.BALANCE(account, period_or_date, [subsidiary], [profit_center], [department], [location], [mode], [service_type]) */
+async function balance(account, periodDate, subsidiary, profitCenter, department, location, mode, serviceType, invocation) {
   if (blank(account) || blank(periodDate)) throw fail('Account and period (or date) are required.');
-  const request = { fn: 'balance', account: accountText(account), ...periodOrDate(periodDate), filters: filtersFrom([subsidiary, profitCenter, department, location, mode]) };
+  const request = { fn: 'balance', account: accountText(account), ...periodOrDate(periodDate), filters: filtersFrom([subsidiary, profitCenter, department, location, mode, serviceType]) };
   return enqueue(request, invocation);
 }
 
-/** =NS.ACTIVITY(account, from_period, [to_period], [subsidiary], [profit_center], [department], [location], [mode]) */
-async function activity(account, fromPeriod, toPeriod, subsidiary, profitCenter, department, location, mode, invocation) {
+/** =NS.ACTIVITY(account, from_period, [to_period], [subsidiary], [profit_center], [department], [location], [mode], [service_type]) */
+async function activity(account, fromPeriod, toPeriod, subsidiary, profitCenter, department, location, mode, serviceType, invocation) {
   if (blank(account) || blank(fromPeriod)) throw fail('Account and from-period are required.');
   const from = String(fromPeriod).trim();
-  const request = { fn: 'activity', account: accountText(account), from, to: blank(toPeriod) ? from : String(toPeriod).trim(), filters: filtersFrom([subsidiary, profitCenter, department, location, mode]) };
+  const request = { fn: 'activity', account: accountText(account), from, to: blank(toPeriod) ? from : String(toPeriod).trim(), filters: filtersFrom([subsidiary, profitCenter, department, location, mode, serviceType]) };
   return enqueue(request, invocation);
 }
 

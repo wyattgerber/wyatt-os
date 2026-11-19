@@ -23,7 +23,9 @@ Excel task pane (addin/, plain HTML + JS, Office.js, XML manifest; no build)
 | `api/src/functions/api.js` | Azure Functions v4 HTTP bindings (thin) |
 | `api/test/api.test.js` | 18 tests (mock data), incl. the PowerShell SQL-copy parity test |
 | `addin/manifest.xml` | Office add-in manifest (placeholders for the SWA host) |
+| Drill-down (`/api/detail`, **Show detail for selected cell**) | Lists the lines behind an `=NS.BALANCE` / `=NS.ACTIVITY` cell on a new sheet: ACTIVITY = lines in the period range; BALANCE = one **Opening balance** line (validated balance − lines) + the period's lines. Every detail sheet must add up exactly to the cell or nothing is returned. Refresh re-runs it. |
 | `addin/functions.js`, `addin/functions.json` | Excel custom functions `=NS.BALANCE(account, period_or_date, [subsidiary], [profit_center], [department], [location], [mode])` and `=NS.ACTIVITY(account, from, [to], ...)`; shared runtime with the task pane; cells calculated together are sent as one request |
+| `addin/preview/demo/` + `scripts/Export-DemoData.ps1` | **Dev-only demo video**: a simulated Excel window around the real add-in. `Export-DemoData.ps1` (your PC) captures the scenario in `scenario.json` from the sandbox and records narration with the Windows voice into `api/out/demo-package.zip` (real sandbox data: never commit); `record.js` replays it and mixes the narration into an MP4. |
 | `addin/preview/` | **Dev-only** preview: runs the real task pane in Chromium with the real API code in mock mode and a stand-in for Excel; `npm run preview` checks sign-in, period dropdowns, formats-before-values, frozen header, Refresh, and writes screenshots to `preview/out/` |
 | `addin/` | Served as-is (no build): `taskpane.html` + `taskpane.js` UI, `api.js` fetch, `auth.js` dialog sign-in, `excelWriter.js` sheet writer, `signin-complete.html`, `manifest.xml`, `assets/` |
 | `scripts/New-NetSuiteCert.ps1` | Creates EC P-256 key + 730-day cert; private key goes straight to 1Password |
@@ -79,8 +81,20 @@ Local API with mock data: copy `api/local.settings.json.sample` to `api/local.se
 - **Validated on the sandbox through the real API (2026-11-16):** `ACTIVITY(1040, Oct 2026)` = −4,952,506.82 (NetSuite GL report); `BALANCE(3400, Jan/Oct 2026)` = −45,097.19 / −17,731,472.19 (NetSuite TB); whole ledger nets to 0.00; date basis = period basis at 2026-10-31 (3400, 1210); `BALANCE(1210, Oct 2026)` = 21,127,458.51 (NetSuite GL running balance); subsidiary filter by name (NTS) works and balances.
 - **Profit Center filter validated (2026-11-16):** `ACTIVITY(4000, Jan 2024, profitCenter "Caterpillar")` = −643,493.61, identical to a NetSuite saved search (Posting, Jan 2024, Profit Center = Caterpillar, account 4000): one line, JE223, **credit** 643,493.61. Note: a saved search's *Amount* column shows income lines credit-positive; compare with the Debit/Credit columns, not Amount.
 - **Location, Department and a second Subsidiary validated (2026-11-16)** against NetSuite saved searches (Debit/Credit basis): `ACTIVITY(4120, Jan 2024, location "West")` = −7,066.88; `ACTIVITY(4150, Jan 2024, subsidiary "Creative Transportation - CTI")` = −3,833.54; `ACTIVITY(1370, Jan 2026, department "Accounting")` = −1,834.00. Name lookups need View on Lists → Locations and Departments (added); subsidiary and classification lookups worked already.
-- **Not yet validated:** Mode (`cseg_appf_mode` is readable but has no data in the sandbox; its value-list table `customrecord_cseg_appf_mode` is unverified, so use the internal ID until checked).
+- **Service Type filter validated (2026-11-16):** `ACTIVITY(4010, Jan 2024, serviceType "Academy")` = −28,080.00, identical to a NetSuite saved search (28,080.00 credit). Value lists `customrecord_cseg_appf_serv_type` and `customrecord_cseg_appf_mode` read correctly (e.g. Mode 1 = Van).
+- **Mode filter validated (2026-11-16):** `ACTIVITY(4060, Jan 2024..Dec 2026, mode "Van")` = −5,500.00, identical to a NetSuite saved search. **All formula filters are now validated.**
+- **Drill-down validated (2026-11-16):** `BALANCE(1210, Oct 2026)` detail = 46 rows (opening 20,568,627.60 + 45 October lines totalling 9,488,003.76 Dr / 8,929,172.85 Cr, identical to NetSuite's GL report) adding up to 21,127,458.51; `ACTIVITY(1040, Oct 2026)` detail = the same 6 lines as NetSuite's GL report, adding up to −4,952,506.82.
 - Values are debit − credit (credit balances negative). Account ranges are inclusive (numeric order when both ends are digits).
+
+## Maintenance (put these in a calendar)
+
+| When | What | How |
+| --- | --- | --- |
+| **Before 2028-11-12** | **NetSuite certificate expires** (sandbox; production will have its own date). Pulls and formulas stop working when it does. | Run `scripts/New-NetSuiteCert.ps1` (new key into a new 1Password item), upload the new public `.pem` under Setup → Integration → OAuth 2.0 Client Credentials (M2M) Setup for `API_User`, give IT the new `NETSUITE_CERTIFICATE_ID` and `NETSUITE_PRIVATE_KEY` for the app settings, run `Test-NetSuite.ps1`, then revoke the old certificate. Start a few weeks early. |
+| When someone joins or leaves the accounting team | Access list | IT edits the `ALLOWED_USERS` app setting (users need no NetSuite login or role). |
+| After NetSuite upgrades, role changes or chart-of-accounts changes | Re-validate | Run `Test-NetSuite.ps1`, `Test-TrialBalance.ps1` (two periods), `Test-GLDetail.ps1`, `Test-Aging.ps1 -Kind AR/AP` and compare with NetSuite's reports as in the results above. |
+
+**Access model:** users sign in with their Microsoft account and are allowed only if listed in `ALLOWED_USERS`; all NetSuite reads go through the single read-only `API_User` integration. Everyone on the list can see everything that role can see (all subsidiaries, full GL and aging), regardless of their own NetSuite permissions: the data owner approves the list on that basis. Every pull and formula batch writes an `AUDIT` line with the user's email.
 
 ## Known problems (not done)
 

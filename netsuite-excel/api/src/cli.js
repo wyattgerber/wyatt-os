@@ -2,12 +2,13 @@
 // (allowlist, validation, paging, reconciliation gate), but from a terminal.
 // Usage: node src/cli.js <report> [key=value ...]
 //        node src/cli.js formulas     (requests JSON array in env CLI_REQUESTS; prints one line per formula)
+//        node src/cli.js detail       (drill-down for the FIRST request in CLI_REQUESTS; summary + CLI_OUT file)
 // Env: CLI_USER_EMAIL (must also be in ALLOWED_USERS), CLI_OUT (optional file for the full JSON), plus the NETSUITE_* settings.
 // Prints a summary only (no row data) so the output is safe to paste; the full result goes to CLI_OUT.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { formulasService, runService } from './lib/service.js';
+import { detailService, formulasService, runService } from './lib/service.js';
 
 async function main() {
   const [report, ...kv] = process.argv.slice(2);
@@ -49,7 +50,9 @@ async function main() {
     });
     return;
   }
-  const reply = await runService(header, JSON.stringify({ report, params }), { log: (m) => console.error(m) });
+  const reply = report === 'detail'
+    ? await detailService(header, JSON.stringify({ request: JSON.parse(process.env.CLI_REQUESTS || '[]')[0] }), { log: (m) => console.error(m) })
+    : await runService(header, JSON.stringify({ report, params }), { log: (m) => console.error(m) });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
 
   if (reply.status !== 200) {

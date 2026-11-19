@@ -38,6 +38,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
       if (u.pathname === '/api/me') r = await svc.meService(principal, { env });
       else if (u.pathname === '/api/reports') r = await svc.reportsService(principal, { env });
       else if (u.pathname === '/api/periods') r = await svc.periodsService(principal, { env });
+      else if (u.pathname === '/api/detail') r = await svc.detailService(principal, route.request().postData() || '', { env, log: () => {} });
       else if (u.pathname === '/api/balances') { balancePosts++; r = await svc.formulasService(principal, route.request().postData() || '', { env, log: () => {} }); }
       else if (u.pathname === '/api/run') r = await svc.runService(principal, route.request().postData() || '', { env, log: () => {} });
       else r = { status: 404, body: {} };
@@ -55,7 +56,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   check(true, 'Not signed in -> pane shows the Sign in button (API answered 401)');
   const registered = await page.evaluate(() => Object.keys(window.__cf).sort().join(','));
   check(registered === 'ACTIVITY,BALANCE', `Custom functions registered: ${registered} (=NS.BALANCE, =NS.ACTIVITY)`);
-  const preSignIn = await page.evaluate(async () => { try { await window.__cf.BALANCE('2000', 'Oct 2026', null, null, null, null, null, { address: 'Sheet1!A1' }); return 'no error'; } catch (e) { return `${e.code} ${e.message}`; } });
+  const preSignIn = await page.evaluate(async () => { try { await window.__cf.BALANCE('2000', 'Oct 2026', null, null, null, null, null, null, { address: 'Sheet1!A1' }); return 'no error'; } catch (e) { return `${e.code} ${e.message}`; } });
   check(/#N\/A Sign in/.test(preSignIn), `Formula before sign-in: ${preSignIn}`);
 
   // 2) Sign in via the dialog
@@ -74,12 +75,12 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
     const inv = (a) => ({ address: `Sheet1!${a}` });
     const serial = (iso) => (Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000;
     const calls = [];
-    for (let i = 0; i < 20; i++) calls.push(B(['1000', '1200', '2000', '4000', '5000'][i % 5], 'Oct 2026', null, null, null, null, null, inv(`A${i + 1}`)));
-    calls.push(B('0:ZZZZ', 'Oct 2026', null, null, null, null, null, inv('B1')));
-    calls.push(B(2000, serial('2026-10-31'), null, null, null, null, null, inv('B2')));
-    calls.push(A(1000, 'Oct 2026', null, null, null, null, null, null, inv('B3')));
-    calls.push(B('2000', 'Okt 2026', null, null, null, null, null, inv('B4')));
-    calls.push(B('2000', 'Oct 2026', 'Mock Sub 1', null, null, null, null, inv('B5')));
+    for (let i = 0; i < 20; i++) calls.push(B(['1000', '1200', '2000', '4000', '5000'][i % 5], 'Oct 2026', null, null, null, null, null, null, inv(`A${i + 1}`)));
+    calls.push(B('0:ZZZZ', 'Oct 2026', null, null, null, null, null, null, inv('B1')));
+    calls.push(B(2000, serial('2026-10-31'), null, null, null, null, null, null, inv('B2')));
+    calls.push(A(1000, 'Oct 2026', null, null, null, null, null, null, null, inv('B3')));
+    calls.push(B('2000', 'Okt 2026', null, null, null, null, null, null, inv('B4')));
+    calls.push(B('2000', 'Oct 2026', 'Mock Sub 1', null, null, null, null, null, inv('B5')));
     const settled = await Promise.allSettled(calls);
     return settled.map((s) => (s.status === 'fulfilled' ? { v: s.value } : { e: `${s.reason.code} ${s.reason.message}` }));
   });
@@ -93,6 +94,23 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   await page.click('#recalc');
   await page.waitForFunction(() => window.__calculated === 'Full');
   check(true, 'Recalculate button asks Excel for a full recalculation (NetSuite formulas refresh)');
+
+  // 2c) Drill-down from a formula cell: B2 holds =NS.BALANCE(2000, <31 Oct 2026 as a date>)
+  await page.evaluate(() => { window.__activeCell = 'Sheet1!Z99'; });
+  await page.click('#detail');
+  await page.waitForSelector('#status.err');
+  check(/Select a cell with =NS\.BALANCE/.test(await page.textContent('#status')), 'Show detail on a non-formula cell explains what to do');
+  await page.evaluate(() => { window.__activeCell = 'Sheet1!B2'; });
+  await page.click('#detail');
+  await page.waitForFunction(() => /Done:/.test(document.querySelector('#status').textContent), null, { timeout: 20000 });
+  const dt = await page.evaluate(() => {
+    const s = window.__sheets.find((x) => x.name.startsWith('DT '));
+    if (!s) return null;
+    const vals = Object.values(s.cells).map(String);
+    return { name: s.name, ties: vals.some((v) => /Ties to the cell: YES/.test(v)), opening: vals.includes('Opening balance'), props: s.props };
+  });
+  check(!!dt && dt.ties && dt.opening, `Show detail made sheet "${dt && dt.name}": opening line + period lines, "Ties to the cell: YES"`);
+  check(dt && dt.props['ns.report'] === 'detail' && JSON.parse(dt.props['ns.params']).fn === 'balance', 'Detail sheet saves the formula request, so Refresh re-runs the drill-down');
 
   // 3) Pick GL Detail; periods are dropdowns of real periods, defaulting to last month
   await page.selectOption('#report', 'gl_detail');
@@ -119,6 +137,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   // 5) Inspect what was written to "Excel"
   const sheets = await page.evaluate(() => window.__sheets.map((s) => ({ ...s, tables: s.tables.length })));
   const sh = sheets.find((s) => s.name.startsWith('GL '));
+  const sheetCountBeforeRefresh = sheets.length;
   check(!!sh, `New sheet created: "${sh && sh.name}"`);
   check(sh.valueBeforeFormat === 0, `Number formats set before values (cells written before a format: ${sh.valueBeforeFormat})`);
   check(sh.cells['0,0'] === 'Period' && sh.frozenRows === 1, `Table starts at A1 and its header row is frozen (frozen rows: ${sh.frozenRows})`);
@@ -133,7 +152,7 @@ const check = (ok, msg) => findings.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`);
   check(textCols > 0, `Text cells use "@" format (${textCols} cells): a memo like "=HYPERLINK(...)" stays plain text`);
 
   // 6) Refresh re-runs into the same sheet
-  const before = sheets.length;
+  const before = sheetCountBeforeRefresh;
   await page.click('#refresh');
   await page.waitForFunction(() => /Done/.test(document.querySelector('#status').textContent) && !document.querySelector('#run').disabled, null, { timeout: 20000 });
   const after = await page.evaluate(() => window.__sheets.length);

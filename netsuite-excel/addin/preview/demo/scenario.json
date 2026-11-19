@@ -1,0 +1,34 @@
+{
+  "title": "Nussbaum - P&L, Oct 2026 (built with =NS formulas)",
+  "period": "Oct 2026",
+  "columns": [
+    { "label": "NTS", "subsidiary": "Nussbaum Transportation - NTS" },
+    { "label": "CTI", "subsidiary": "Creative Transportation - CTI" },
+    { "label": "All subsidiaries", "subsidiary": null }
+  ],
+  "rows": [
+    { "label": "Revenue (4000-4999)", "account": "4000:4999" },
+    { "label": "Cost of sales (5000-5999)", "account": "5000:5999" },
+    { "label": "Operating expenses (6000-7999)", "account": "6000:7999" }
+  ],
+  "netLabel": "Net (negative = profit)",
+  "balances": [
+    { "label": "Cash - Wells Fargo NTS (1040)", "account": "1040" },
+    { "label": "Accounts receivable (1210)", "account": "1210" }
+  ],
+  "typo": { "account": "1040", "period": "Okt 2026" },
+  "drill": { "row": 0, "column": 0 },
+  "report": { "id": "trial_balance", "params": { "period": "Oct 2026" } },
+  "narration": [
+    "This is the NetSuite add-in for Excel. It adds a NetSuite button to the Home tab.",
+    "The first time, you sign in with your Nussbaum Microsoft account. You don't need a NetSuite login.",
+    "Type NetSuite formulas into any cell. N S dot ACTIVITY returns the activity for an account, or a range of accounts. Here, October revenue for Nussbaum Transportation.",
+    "Fill in the rest of the statement. Every cell Excel calculates together goes to NetSuite in a single request.",
+    "N S dot BALANCE returns ending balances, like cash and accounts receivable.",
+    "If there's a typo, the cell shows an error with the reason. It never shows a wrong number.",
+    "To see where a number comes from, select the cell and click Show detail.",
+    "A new sheet lists every NetSuite line behind that number, and it always adds up exactly to the cell.",
+    "You can also pull complete reports, like the trial balance, onto a new sheet.",
+    "Everything is read only, and every pull is checked against NetSuite's own totals before it reaches Excel."
+  ]
+}

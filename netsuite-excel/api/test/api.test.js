@@ -7,8 +7,8 @@ import { formatMoney, parseMoney } from '../src/lib/money.js';
 import { principalFromHeader } from '../src/lib/auth.js';
 import { MockProvider } from '../src/lib/mock.js';
 import { runReport } from '../src/lib/runReport.js';
-import { formulasService, meService, periodsService, reportsService, runService } from '../src/lib/service.js';
-import { activitySql, balanceDateSql, balancePeriodSql, compareAcct } from '../src/lib/formulas.js';
+import { detailService, formulasService, meService, periodsService, reportsService, runService } from '../src/lib/service.js';
+import { activitySql, balanceDateSql, balancePeriodSql, compareAcct, detailSql } from '../src/lib/formulas.js';
 import { buildClientAssertion, NetSuiteClient } from '../src/lib/netsuite.js';
 
 const principal = (email) => Buffer.from(JSON.stringify({ userDetails: email, userRoles: ['authenticated'] })).toString('base64');
@@ -434,4 +434,49 @@ test('formulas: request limits and allowlist', async () => {
   const tooMany = await formulasService(principal('ann@example.com'), JSON.stringify({ requests: Array.from({ length: 1001 }, () => ({})) }), { env: ENV });
   assert.equal(tooMany.status, 413);
   assert.equal((await formulasService(principal('ann@example.com'), JSON.stringify({ requests: [], sql: 'x' }), { env: ENV })).status, 400);
+});
+
+// ---------------- drill-down ----------------
+const detail = async (request) => detailService(principal('ann@example.com'), JSON.stringify({ request }), { env: ENV });
+const sumRows = (res) => {
+  const di = res.columns.findIndex((c) => c.key === 'debit');
+  const ci = res.columns.findIndex((c) => c.key === 'credit');
+  return formatMoney(res.rows.reduce((s, r) => s + parseMoney(r[di]) - parseMoney(r[ci]), 0n));
+};
+
+test('drill-down: every detail sheet adds up exactly to its formula cell', async () => {
+  const cases = [
+    { fn: 'activity', account: '1000', from: 'Oct 2026', to: 'Oct 2026' },
+    { fn: 'activity', account: '1000:2000', from: 'Sep 2026', to: 'Oct 2026', filters: { subsidiary: 'Mock Sub 2' } },
+    { fn: 'balance', account: '2000', period: 'Oct 2026' },
+    { fn: 'balance', account: '4000:5100', date: '2026-10-15' },
+  ];
+  const values = await formulas(cases);
+  for (let i = 0; i < cases.length; i++) {
+    const r = await detail(cases[i]);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(sumRows(r.body), values[i].value, `detail of case ${i} must equal the cell`);
+    assert.match(r.body.info.notes[0], /Ties to the cell: YES/);
+    assert.equal(r.body.info.balanced, null, 'no "Balanced: NO" on a drill-down');
+    const ti = r.body.columns.findIndex((c) => c.key === 'trantype');
+    assert.equal(r.body.rows[0][ti] === 'Opening balance', cases[i].fn === 'balance', 'BALANCE detail starts with one opening line; ACTIVITY has none');
+  }
+});
+
+test('drill-down: bad requests are rejected; SQL only takes digit IDs', async () => {
+  assert.equal((await detail({ fn: 'balance', account: '2000', period: 'Okt 2026' })).status, 400);
+  assert.equal((await detail({ fn: 'balance', account: '9990:9999', period: 'Oct 2026' })).status, 400, 'no accounts in range');
+  assert.equal((await detailService(principal('eve@example.com'), JSON.stringify({ request: {} }), { env: ENV })).status, 403);
+  assert.throws(() => detailSql({ kind: 'periods', from: 'Oct 2026', to: 'Oct 2026' }, ['1 OR 1=1'], {}));
+  const q = detailSql({ kind: 'dates', fromDate: '2026-10-01', toDate: '2026-10-15' }, ['12', '13'], { location: '4' });
+  assert.match(q.rows, /tal\.account IN \(12, 13\)/);
+  assert.match(q.totals, /tl\.location = 4/);
+  assert.doesNotMatch(q.rows.slice(q.rows.indexOf('ORDER BY')), /SELECT/);
+});
+
+test('Pull Info: GL Detail filtered to one account shows no Balanced line; unfiltered still checks it', async () => {
+  const one = await runReport(getReport('gl_detail'), { ...OCT, account: '1000' }, new MockProvider(), { maxRows: 20000, user: 'x', mock: true });
+  const all = await runReport(getReport('gl_detail'), OCT, new MockProvider(), { maxRows: 20000, user: 'x', mock: true });
+  assert.equal(one.info.balanced, null);
+  assert.equal(all.info.balanced, true);
 });

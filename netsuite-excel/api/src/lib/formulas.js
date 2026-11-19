@@ -8,7 +8,7 @@
 //   NS.ACTIVITY(account, fromPeriod, toPeriod, [filters])   net movement over a period range (VALIDATED GL basis).
 //
 // account: "4000" or an inclusive range "4000:4999" (numeric compare when all parts are digits).
-// filters: subsidiary, profitCenter (NetSuite Class, renamed), department, location, mode (custom segment).
+// filters: subsidiary, profitCenter (NetSuite Class, renamed), department, location, mode, serviceType (custom segments).
 //   Each value is an internal ID or a name. Names are resolved to IDs HERE; only digits ever reach the SQL.
 //
 // Requests are grouped by (function, period/date/range, filter set); each group is ONE SuiteQL query plus its
@@ -17,8 +17,8 @@
 
 import { ApiError } from './errors.js';
 import { formatMoney, parseMoney } from './money.js';
-import { TAL_FROM, TAL_BASE, PL_TYPES, periodRange, tbParts, isIsoDate } from './catalog.js';
-import { pool } from './runReport.js';
+import { TAL_FROM, TAL_BASE, PL_TYPES, periodRange, tbParts, isIsoDate, lineColumns } from './catalog.js';
+import { pool, runReport } from './runReport.js';
 
 export const MAX_REQUESTS = 1000;
 const ACCOUNT_RE = /^[A-Za-z0-9._-]{1,30}$/;
@@ -31,6 +31,7 @@ export const FILTERS = {
   department: { column: 'tl.department', table: 'department', label: 'Department' },
   location: { column: 'tl.location', table: 'location', label: 'Location' },
   mode: { column: 'tl.cseg_appf_mode', table: 'customrecord_cseg_appf_mode', label: 'Mode' },
+  serviceType: { column: 'tl.cseg_appf_serv_type', table: 'customrecord_cseg_appf_serv_type', label: 'Service Type' },
 };
 
 const TL_JOIN = ' LEFT JOIN transactionline tl ON tl.transaction = tal.transaction AND tl.id = tal.transactionline';
@@ -248,4 +249,117 @@ export async function evaluateBatch(rawRequests, { periods, loadLookup, provider
     }
   }));
   return { results, groups: list.length };
+}
+
+// ---------- drill-down ("Show detail" on a formula cell) ----------
+//
+// ACTIVITY cell -> the posting lines in that period range.
+// BALANCE cell  -> the lines posted in that period (or, for a date, from the 1st of that month to the date)
+//                  plus ONE "Opening balance" line = validated BALANCE value - those lines.
+// Either way the sheet adds up exactly to the cell, and that tie is checked before anything is returned.
+// Same account/range and filters as the formula; lines pass the same reconciliation gate as the reports.
+
+/** One-row inline view for a date window (transaction dates), like periodRange() for periods. */
+function dateWindowWhere(fromIso, toIso) {
+  return `t.trandate >= TO_DATE('${fromIso}', 'YYYY-MM-DD') AND t.trandate <= TO_DATE('${toIso}', 'YYYY-MM-DD')`;
+}
+
+/** Lines SQL for a window, a list of account IDs (digits) and filter IDs (digits). */
+export function detailSql(window, accountIds, filterIds) {
+  for (const id of accountIds) if (!ID_RE.test(String(id))) throw new Error('account id must be digits');
+  const f = filterSql(filterIds);
+  const rg = window.kind === 'periods' ? ` INNER JOIN ${periodRange(window.from, window.to)} rg ON 1 = 1` : '';
+  const win = window.kind === 'periods' ? 'pp.startdate >= rg.rstart AND pp.enddate <= rg.rend' : dateWindowWhere(window.fromDate, window.toDate);
+  const base = `${TAL_FROM} INNER JOIN accountingperiod pp ON pp.id = t.postingperiod${rg}`;
+  const where = `${TAL_BASE} AND ${win} AND tal.account IN (${accountIds.join(', ')})${f.where}`;
+  return {
+    totals: `SELECT COUNT(*) AS cnt, ROUND(SUM(tal.debit), 2) AS debits, ROUND(SUM(tal.credit), 2) AS credits ${base}${f.join} WHERE ${where}`,
+    rows:
+      `SELECT pp.periodname AS postingperiod, TO_CHAR(t.trandate, 'YYYY-MM-DD') AS trandate, t.type AS trantype, t.tranid AS tranid, ` +
+      `a.acctnumber AS acctnumber, a.accountsearchdisplayname AS acctname, NVL(BUILTIN.DF(tl.entity), BUILTIN.DF(t.entity)) AS entityname, ` +
+      `BUILTIN.DF(tl.subsidiary) AS subsidiary, tl.memo AS memo, tal.debit AS debit, tal.credit AS credit ` +
+      `${base} INNER JOIN account a ON a.id = tal.account${TL_JOIN} WHERE ${where} ` +
+      `ORDER BY pp.startdate, t.trandate, t.id, tal.transactionline, tal.account`,
+  };
+}
+
+/** Account IDs whose number falls in the request's account/range (same compare as the formulas). */
+function accountIdsFor(spec, accounts) {
+  return accounts.filter((a) => a.acctnumber && compareAcct(a.acctnumber, spec.lo) >= 0 && compareAcct(a.acctnumber, spec.hi) <= 0).map((a) => a.id);
+}
+
+function describe(req) {
+  const what = req.fn === 'activity' ? `NS.ACTIVITY(${req.account.text}, ${req.from}${req.to !== req.from ? ` .. ${req.to}` : ''})` : `NS.BALANCE(${req.account.text}, ${req.period ?? req.date})`;
+  const f = Object.entries(req.filters).map(([k, v]) => `${FILTERS[k].label} = ${v}`).join('; ');
+  return f ? `${what} where ${f}` : what;
+}
+
+/**
+ * Builds the detail ReportResult for one formula request.
+ * deps: { periods, provider, loadLookup(filterKey), loadAccounts(), maxRows, user, mock, log }
+ */
+export async function buildDetail(rawRequest, deps) {
+  const req = normalizeRequest(rawRequest, deps.periods);
+  const needed = Object.entries(req.filters).filter(([, v]) => !ID_RE.test(v)).map(([k]) => k);
+  const lookups = {};
+  for (const k of needed) lookups[k] = await deps.loadLookup(k);
+  const ids = resolveFilters(req.filters, lookups);
+  const accountIds = accountIdsFor(req.account, await deps.loadAccounts());
+  if (accountIds.length === 0) throw new ApiError(400, 'NO_ACCOUNTS', `No accounts match "${req.account.text}".`);
+
+  let window;
+  if (req.fn === 'activity') window = { kind: 'periods', from: req.from, to: req.to };
+  else if (req.basis === 'period') window = { kind: 'periods', from: req.period, to: req.period };
+  else window = { kind: 'dates', fromDate: `${req.date.slice(0, 8)}01`, toDate: req.date };
+
+  const sql = detailSql(window, accountIds, ids);
+  const display = { formula: describe(req) };
+  const def = {
+    id: 'detail',
+    title: 'Formula detail',
+    validated: true,
+    params: [],
+    columns: lineColumns,
+    notes: [],
+    sums: [{ column: 'debit', alias: 'debits' }, { column: 'credit', alias: 'credits' }],
+    build: () => sql,
+    balances: () => false, // a drill-down is one account/range: it is not supposed to balance
+    // What the (mock) provider needs to answer; the real NetSuite client only uses the SQL.
+    queryParams: { window: JSON.stringify(window), accounts: accountIds.join(','), filters: JSON.stringify(ids) },
+  };
+  const result = await runReport(def, display, deps.provider, { maxRows: deps.maxRows, user: deps.user, mock: deps.mock });
+  const di = result.columns.findIndex((c) => c.key === 'debit');
+  const ci = result.columns.findIndex((c) => c.key === 'credit');
+  const linesNet = result.rows.reduce((s, r) => s + parseMoney(r[di]) - parseMoney(r[ci]), 0n);
+
+  // The cell's value, from the validated formula engine (one query group).
+  const cell = (await evaluateBatch([rawRequest], { periods: deps.periods, provider: deps.provider, loadLookup: deps.loadLookup, log: deps.log })).results[0];
+  if (cell.error) throw new ApiError(502, 'FORMULA_FAILED', cell.error);
+  const value = parseMoney(cell.value);
+
+  if (req.fn === 'balance') {
+    const opening = value - linesNet;
+    const row = result.columns.map((c) => {
+      if (c.key === 'trantype') return 'Opening balance';
+      if (c.key === 'acctname') return window.kind === 'periods' ? `Balance before ${req.period}` : `Balance before ${window.fromDate}`;
+      if (c.key === 'acctnumber') return req.account.text;
+      if (c.key === 'debit') return formatMoney(opening > 0n ? opening : 0n);
+      if (c.key === 'credit') return formatMoney(opening < 0n ? -opening : 0n);
+      return '';
+    });
+    result.rows.unshift(row);
+  }
+  const total = result.rows.reduce((s, r) => s + parseMoney(r[di]) - parseMoney(r[ci]), 0n);
+  if (total !== value) {
+    throw new ApiError(502, 'RECONCILIATION_FAILED', 'The detail did not add up to the formula, so nothing was returned.', `rows ${total} vs cell ${value}`);
+  }
+  result.info.rowCount = result.rows.length;
+  result.info.notes = [
+    `Ties to the cell: YES. These rows add up to ${formatMoney(value)} (debit - credit), the value of ${describe(req)}.`,
+    req.fn === 'balance'
+      ? 'Rows: one Opening balance line (the validated balance minus the lines below), then every posting line in the window.'
+      : 'Rows: every posting line in the period range.',
+    'Same account/range and filters as the formula; lines reconciled to NetSuite totals.',
+  ];
+  return result;
 }

@@ -37,6 +37,9 @@ async function call(path, init, retries = 2) {
 export const getMe = () => call('/api/me');
 export const getReports = () => call('/api/reports');
 export const getPeriods = () => call('/api/periods');
+/** Drill-down: the lines behind one =NS.BALANCE / =NS.ACTIVITY cell (not auto-retried, like runReport). */
+export const getDetail = (request) =>
+  call('/api/detail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request }) }, 0);
 /** POST is not auto-retried: a pull is read-only but slow, so the user decides whether to run it again. */
 export const runReport = (report, params) =>
   call('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report, params }) }, 0);

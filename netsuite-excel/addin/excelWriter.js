@@ -11,7 +11,8 @@ const FORMATS = {
   money: '#,##0.00;(#,##0.00)',
   int: '0',
 };
-const SHORT = { trial_balance: 'TB', journal_entries: 'JE', gl_detail: 'GL', ar_aging: 'AR', ap_aging: 'AP' };
+const SHORT = { trial_balance: 'TB', journal_entries: 'JE', gl_detail: 'GL', ar_aging: 'AR', ap_aging: 'AP', detail: 'DT' };
+const MAX_PROP = 255; // Excel custom property value limit
 export const PROP_REPORT = 'ns.report';
 export const PROP_PARAMS = 'ns.params';
 
@@ -80,7 +81,7 @@ async function setProp(context, sheet, key, value) {
 }
 
 /** Writes the result to a NEW sheet, or over the active sheet when `refresh` is true. Returns the sheet name. */
-export async function writeReport(result, refresh = false) {
+export async function writeReport(result, refresh = false, saveAs = null) {
   return Excel.run(async (context) => {
     const sheets = context.workbook.worksheets;
     let sheet;
@@ -135,8 +136,13 @@ export async function writeReport(result, refresh = false) {
     sheet.freezePanes.freezeRows(1);
     await context.sync();
 
-    await setProp(context, sheet, PROP_REPORT, result.info.report);
-    await setProp(context, sheet, PROP_PARAMS, JSON.stringify(result.info.params));
+    // What Refresh re-runs. Drill-down sheets save the formula request instead of the display parameters.
+    const save = saveAs ?? { report: result.info.report, params: result.info.params };
+    const saved = JSON.stringify(save.params);
+    if (saved.length <= MAX_PROP) {
+      await setProp(context, sheet, PROP_REPORT, save.report);
+      await setProp(context, sheet, PROP_PARAMS, saved);
+    }
     sheet.activate();
     sheet.load('name');
     await context.sync();

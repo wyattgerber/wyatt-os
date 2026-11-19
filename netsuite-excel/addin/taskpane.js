@@ -1,4 +1,5 @@
-import { FriendlyError, getMe, getPeriods, getReports, runReport } from './api.js';
+import { FriendlyError, getDetail, getMe, getPeriods, getReports, runReport } from './api.js';
+import { lastRequestByCell } from './functions.js';
 import { signIn } from './auth.js';
 import { readSavedPull, writeReport } from './excelWriter.js';
 
@@ -90,6 +91,7 @@ function setBusy(b) {
   ($('run')).disabled = b;
   ($('refresh')).disabled = b;
   ($('recalc')).disabled = b;
+  ($('detail')).disabled = b;
 }
 
 async function execute(reportId, params, refresh) {
@@ -97,9 +99,9 @@ async function execute(reportId, params, refresh) {
   setBusy(true);
   setStatus('Pulling from NetSuite... large reports can take up to a minute.');
   try {
-    const result = await runReport(reportId, params);
+    const result = reportId === 'detail' ? await getDetail(params) : await runReport(reportId, params);
     setStatus(`Writing ${result.rows.length.toLocaleString('en-US')} rows to Excel...`);
-    const name = await writeReport(result, refresh);
+    const name = await writeReport(result, refresh, { report: reportId, params });
     setStatus(`Done: ${result.rows.length.toLocaleString('en-US')} rows on sheet "${name}". Reconciled to NetSuite totals.`, 'ok');
   } catch (e) {
     if (e instanceof FriendlyError && e.status === 401) { showSignIn(); return; }
@@ -160,6 +162,24 @@ Office.onReady(() => {
       void execute(saved.report, saved.params, true);
     } catch {
       setStatus('Could not read this sheet. Please try again.', 'err');
+    }
+  });
+  $('detail').addEventListener('click', async () => {
+    try {
+      const address = await Excel.run(async (context) => {
+        const cell = context.workbook.getActiveCell();
+        cell.load('address');
+        await context.sync();
+        return cell.address;
+      });
+      const request = lastRequestByCell.get(address);
+      if (!request) {
+        setStatus('Select a cell with =NS.BALANCE or =NS.ACTIVITY first. If the workbook was just opened, click "Recalculate NetSuite formulas" once.', 'err');
+        return;
+      }
+      void execute('detail', request, false);
+    } catch {
+      setStatus('Could not read the selected cell. Please try again.', 'err');
     }
   });
   $('recalc').addEventListener('click', async () => {

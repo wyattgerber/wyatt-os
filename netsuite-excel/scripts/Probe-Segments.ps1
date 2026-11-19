@@ -15,7 +15,10 @@
 [CmdletBinding()]
 param(
     [string]$Vault = 'NetSuite',
-    [string]$Item = 'Excel Addin Connection'
+    [string]$Item = 'Excel Addin Connection',
+    # Only sample lines from transactions that post to this account (e.g. 4060, where Mode = Van exists),
+    # list the custom/segment columns those lines carry, and test the segment value-list tables.
+    [ValidatePattern('^[A-Za-z0-9._-]{1,30}$')][string]$Account
 )
 
 Set-StrictMode -Version Latest
@@ -25,6 +28,39 @@ $ErrorActionPreference = 'Stop'
 $conn = $null
 try {
     $conn = Connect-NetSuite $Vault $Item
+
+    if ($Account) {
+        # Fast two-step sample: first up to 50 transaction IDs that post to the account, then those lines only.
+        $ids = Invoke-SuiteQL $conn ("SELECT DISTINCT tal.transaction AS txn FROM transactionaccountingline tal INNER JOIN account a ON a.id = tal.account " +
+            "WHERE a.acctnumber = '$Account' AND tal.posting = 'T' AND tal.accountingbook = 1") 50
+        if ($ids.Status -ne 200) { throw "Finding transactions for account $Account failed (HTTP $($ids.Status)): $(Format-NsError $ids)" }
+        $idList = @((Get-Items $ids.Body) | ForEach-Object { Get-Prop $_ 'txn' } | Where-Object { "$_" -match '^\d+$' } | ForEach-Object { [long]$_ })
+        Write-Host "Transaction IDs found for ${Account}: $($idList -join ', ')"
+        if ($idList.Count -eq 0) { Write-Host "Raw answer: $((Get-Items $ids.Body) | ConvertTo-Json -Compress -Depth 3)" }
+        if ($idList.Count -eq 0) { throw "No posting transactions found for account $Account." }
+        $r = Invoke-SuiteQL $conn "SELECT * FROM transactionline tl WHERE tl.transaction IN ($($idList -join ', '))" 1000
+        if ($r.Status -ne 200) { throw "Sampling lines for account $Account failed (HTTP $($r.Status)): $(Format-NsError $r)" }
+        $rows = Get-Items $r.Body
+        $cols = [System.Collections.Generic.HashSet[string]]::new()
+        foreach ($row in $rows) { foreach ($n in $row.PSObject.Properties.Name) { [void]$cols.Add($n) } }
+        $interesting = @($cols | Where-Object { $_ -match '^cseg|^custcol|mode|serv' } | Sort-Object)
+        Write-Host "Lines from $($idList.Count) transactions posting to $Account sampled: $($rows.Count). Custom/segment columns seen: $($interesting -join ', ')"
+        foreach ($c in $interesting) {
+            $n = @($rows | Where-Object { $null -ne (Get-Prop $_ $c) -and "$(Get-Prop $_ $c)" -ne '' }).Count
+            $vals = @($rows | ForEach-Object { Get-Prop $_ $c } | Where-Object { $null -ne $_ -and "$_" -ne '' } | Select-Object -Unique -First 6) -join ', '
+            Write-Host ("  {0,-40} lines with a value: {1,5}   values (internal IDs): {2}" -f $c, $n, $vals)
+        }
+        Write-Host ''
+        foreach ($t in 'customrecord_cseg_appf_mode', 'customrecord_cseg_appf_serv_type') {
+            $l = Invoke-SuiteQL $conn "SELECT id, name FROM $t ORDER BY id" 20
+            if ($l.Status -eq 200) {
+                $items = Get-Items $l.Body
+                Write-Host "[OK]   value list $t : $($items.Count) rows; first row as returned: $(if ($items.Count) { $items[0] | ConvertTo-Json -Compress -Depth 3 } else { '(none)' })" -ForegroundColor Green
+            }
+            else { Write-Host "[FAIL] value list $t -> HTTP $($l.Status): $(Format-NsError $l)" -ForegroundColor Red }
+        }
+        return
+    }
 
     # 1) Column names across 2,000 lines (values are not printed). Empty fields are omitted per row, so union them.
     $seen = [System.Collections.Generic.HashSet[string]]::new()
@@ -53,7 +89,7 @@ try {
         if ($u.Status -ne 200) { Write-Host "[FAIL] $f -> HTTP $($u.Status): $(Format-NsError $u)" -ForegroundColor Red; continue }
         $x = (Get-Items $u.Body)[0]
         $s = Invoke-SuiteQL $conn "SELECT BUILTIN.DF(tl.$f) AS label, COUNT(*) AS n FROM transactionline tl WHERE tl.$f IS NOT NULL GROUP BY BUILTIN.DF(tl.$f) ORDER BY COUNT(*) DESC" 5
-        $labels = if ($s.Status -eq 200) { (@(Get-Items $s.Body) | ForEach-Object { Get-Prop $_ 'label' }) -join ' | ' } else { "(names unavailable: HTTP $($s.Status))" }
+        $labels = if ($s.Status -eq 200) { ((Get-Items $s.Body) | ForEach-Object { Get-Prop $_ 'label' }) -join ' | ' } else { "(names unavailable: HTTP $($s.Status))" }
         Write-Host ("{0,-28} posting lines with a value: {1,7}   distinct values: {2,5}   e.g. {3}" -f $f, (Get-Prop $x 'used'), (Get-Prop $x 'distinct_values'), $labels)
     }
 }

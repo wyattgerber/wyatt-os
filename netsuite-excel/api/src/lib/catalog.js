@@ -80,7 +80,7 @@ const periodRangeParams = [
   { name: 'toPeriod', label: 'To period', type: 'text', required: true },
 ];
 
-const lineColumns = [
+export const lineColumns = [
   { key: 'postingperiod', label: 'Period', type: 'text' },
   { key: 'trandate', label: 'Date', type: 'date' },
   { key: 'trantype', label: 'Type', type: 'text' },
@@ -123,7 +123,7 @@ function lineQueries(p, extraWhere) {
   };
 }
 
-const lineSums = [
+export const lineSums = [
   { column: 'debit', alias: 'debits' },
   { column: 'credit', alias: 'credits' },
 ];
@@ -226,6 +226,7 @@ const glDetail = {
     { name: 'account', label: 'Account # (optional)', type: 'text', required: false, help: 'Leave blank for all accounts' },
   ],
   columns: lineColumns,
+  balances: (p) => !p.account, // filtered to one account it need not balance
   notes: [
     'All posting lines, accounting book 1, by posting period (same basis as the Trial Balance).',
     'Validated 2026-11-13 (sandbox), Oct 2026: 2,230 lines; every account ties to TB(Oct) - TB(Sep); six accounts match NetSuite\'s General Ledger report; the Account # filter was checked on account 1040.',
