@@ -70,7 +70,7 @@ define(['N/search', 'N/record', 'N/https', 'N/file', 'N/log'], (search, record, 
         // Notes: custom body field (Text Area / long text, not Free-Form Text).
         NOTES_FIELD: 'custbody_collections_notes',
         NOTES_MAX: 4000,                           // longer text keeps the newest lines
-        NOTE_MODE: { all: 'replace', cat: 'append' },
+        NOTE_MODE: { all: 'append', cat: 'append' },
 
         // "Promised to Pay Date", filled for rows whose status is Approved for Pay.
         // '' = disabled (dates are then added to the note text instead).

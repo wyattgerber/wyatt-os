@@ -11,7 +11,7 @@
 
 ## What stays the same
 - Each tab keeps its old rules. The Notes tab covers any customer. The CAT tabs are limited to customers under the CAT parent, and the server checks that limit again on every search and write.
-- The Notes tab **replaces** the invoice note. The CAT tab **appends** it. Both are set in `CFG.NOTE_MODE`.
+- Both tabs **append** notes. A line that is already in the invoice note is not added again (`CFG.NOTE_MODE`).
 - Attachments: 1 file per invoice on the Notes tab and 5 on the CAT tab (`CFG.ATTACH_MAX_FILES`).
 
 ## Small changes
